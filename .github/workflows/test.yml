@@ -2,6 +2,27 @@ name: Test
 
 on:
   push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Install dependencies
+        run: make dep
+      - name: Tests (dart)
+        run: make ci_check_client
+      - name: Tests (flutter)
+        run: make ci_check_fluttername: Test
+
+on:
+  push:
     branches: [main]
   pull_request:
     branches: [main]
