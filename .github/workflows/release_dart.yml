@@ -4,6 +4,36 @@ on:
   release:
     types: [created]
     tags:
+      - graphql_plus-v*
+  workflow_run:
+    workflows:
+      - "Test"
+      - "Build"
+    branches: [ master ]
+    types:
+      - completed
+
+jobs:
+  publishing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v4 # required!
+
+      - name: 'publish graphql_plus to Pub.dev'
+        uses: k-paxian/dart-package-publisher@master
+        with:
+          credentialJson: ${{ secrets.CREDENTIAL_JSON }}
+          flutter: false
+          skipTests: true
+          force: true
+          dryRunOnly: ${{ github.event_name != 'release' }}
+          relativePath: './packages/graphql_plus/'name: Release (dart)
+
+on:
+  release:
+    types: [created]
+    tags:
       - graphql-v*
   workflow_run:
     workflows:
