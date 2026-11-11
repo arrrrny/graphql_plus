@@ -1,4 +1,4 @@
-import 'package:graphql_flutter/graphql_flutter.dart';
+import 'package:graphql_flutter_plus/graphql_flutter_plus.dart';
 import 'package:flutter/material.dart';
 
 String uuidFromObject(Object object) {

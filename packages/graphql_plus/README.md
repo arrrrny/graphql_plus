@@ -80,7 +80,7 @@ $ flutter pub add graphql
 And then import it inside your dart code:
 
 ```dart
-import 'package:graphql/client.dart';
+import 'package:graphql_plus/graphql_plus.dart';
 ```
 
 ## Migration Guide
@@ -525,7 +525,7 @@ GraphQL operations can be cancelled before they complete, allowing you to abort 
 Create a `CancellationToken` and pass it to your operation options:
 
 ```dart
-import 'package:graphql/client.dart';
+import 'package:graphql_plus/graphql_plus.dart';
 
 final cancellationToken = CancellationToken();
 

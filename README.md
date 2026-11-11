@@ -77,7 +77,7 @@ Around `graphql_flutter` are builds awesome tools like:
 ✅ &nbsp; [Query polling and rebroadcasting](./packages/graphql/README.md#clientwatchquery-and-observablequery)  
 ✅ &nbsp; [In memory and persistent caching](./packages/graphql/README.md#persistence)  
 ✅ &nbsp; [GraphQL Upload](./packages/graphql/README.md#graphql-upload)  
-✅ &nbsp; [Optimistic results](./packages/graphql_flutter/README.md#optimism)  
+✅ &nbsp; [Optimistic results](./packages/graphql_flutter_plus/README.md#optimism)  
 ✅ &nbsp; [Modularity](./packages/graphql/README.md#links)  
 ✅ &nbsp; [Client-state management](./packages/graphql/README.md#direct-cache-access-api)  
 ✅ &nbsp; [Operation cancellation](./packages/graphql/README.md#cancellation)  
@@ -140,3 +140,12 @@ External guides, tutorials, and other resources from the GraphQL Flutter communi
 
 - [Ultimate toolchain to work with GraphQL in Flutter](https://medium.com/@v.ditsyak/ultimate-toolchain-to-work-with-graphql-in-flutter-13aef79c6484):  
   An intro to using `graphql_flutter` with [`artemis`](https://pub.dev/packages/artemis) for code generation and [`graphql-faker`](https://github.com/APIs-guru/graphql-faker) for API prototyping
+
+---
+
+> **Fork packages**: the Dart client is [`graphql_plus`](https://pub.dev/packages/graphql_plus)
+> (`packages/graphql_plus`, fork of `graphql` 5.2.4) and the Flutter widgets layer is
+> [`graphql_flutter_plus`](https://pub.dev/packages/graphql_flutter_plus)
+> (`packages/graphql_flutter_plus`, fork of `graphql_flutter` 5.3.0, rebuilt on `graphql_plus`).
+> See [UPSTREAM_ISSUES_TRIAGE.md](UPSTREAM_ISSUES_TRIAGE.md) for how we triage and revive the
+> upstream issue backlog.
