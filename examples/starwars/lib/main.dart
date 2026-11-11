@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:graphql_flutter/graphql_flutter.dart';
+import 'package:graphql_flutter_plus/graphql_flutter_plus.dart';
 import 'package:starwars_app/view/client/graphql_view.dart';
 import 'package:universal_platform/universal_platform.dart';
 
