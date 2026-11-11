@@ -103,8 +103,32 @@ class SocketClientConfig {
   /// ```
   final WebSocketConnect? connectFn;
 
-  /// Custom header to add inside the client
-  final Map<String, dynamic>? headers;
+  /// Custom headers sent with the websocket connection request.
+  ///
+  /// Can be a literal map, a callback, or an async callback that returns
+  /// a `Map<String, dynamic>` (or null). If [headers] is a function, it is
+  /// invoked (and awaited if it returns a future) on **every** connection
+  /// and reconnection attempt, so authentication tokens can be refreshed
+  /// between attempts:
+  ///
+  /// ```dart
+  /// SocketClientConfig(
+  ///   headers: () => {'Authorization': 'Bearer ${authStore.currentToken}'},
+  /// )
+  /// ```
+  final dynamic headers;
+
+  /// The headers to use for the current connection attempt.
+  ///
+  /// If [headers] is a function, it is re-invoked on each attempt,
+  /// yielding fresh values on reconnect.
+  Future<Map<String, dynamic>?> get resolvedHeaders async {
+    final dynamic headers = this.headers;
+    if (headers is Function) {
+      return await headers() as Map<String, dynamic>?;
+    }
+    return headers as Map<String, dynamic>?;
+  }
 
   final Future<Duration?>? Function(int? code, String? reason)?
       onConnectionLost;
@@ -113,23 +137,30 @@ class SocketClientConfig {
 
   /// Function to define another connection without call directly
   /// the connection function
-  FutureOr<WebSocketChannel> connect(
+  ///
+  /// If [headers] is a function, it is re-evaluated here on every
+  /// connection and reconnection attempt.
+  Future<WebSocketChannel> connect(
       {required Uri uri,
       Iterable<String>? protocols,
-      Map<String, dynamic>? headers}) {
+      Map<String, dynamic>? headers}) async {
     if (connectFn != null) {
       return connectFn!(uri, protocols);
     }
     return defaultConnectPlatform(
       uri,
       protocols,
-      headers: headers ?? this.headers,
+      headers: headers ?? await resolvedHeaders,
     );
   }
 
   /// Payload to be sent with the connection_init request.
   ///
   /// Can be a literal value, a callback, or an async callback. End value must be valid argument for `json.encode`.
+  ///
+  /// If [initialPayload] is a function, it is re-invoked on every
+  /// connection and reconnection attempt, so authentication tokens
+  /// inside the payload can be refreshed between attempts.
   ///
   /// Internal usage is roughly:
   /// ```dart

@@ -1,3 +1,14 @@
+# v5.2.6 (unreleased)
+
+## Added
+- **`SocketClientConfig.headers` now accepts a callback** (sync or async) in
+  addition to a literal map. The resolved headers are re-evaluated on every
+  connection and reconnection attempt, so `Authorization` headers can be
+  refreshed between reconnects. Previously the header map was fixed at config
+  construction and an expired Bearer token would fail every reconnection
+  forever (upstream graphql-flutter#1323). The existing payload-based refresh
+  path (`initialPayload` callback) is unchanged and now documented.
+
 # v5.2.5
 
 Forked from `package:graphql` 5.2.4 as `graphql_plus` (arrrrny/graphql_plus) to

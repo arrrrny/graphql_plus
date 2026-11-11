@@ -9,10 +9,22 @@ const String forceDisconnectCommand = '___force_disconnect___';
 const String forceAuthDisconnectCommand = '___force_auth_disconnect___';
 
 /// Main function to create and run the echo server over the web socket.
+///
+/// If [onConnectionHeaders] is provided, it is invoked with the HTTP headers
+/// of every upgraded websocket connection, so tests can assert which headers
+/// (e.g. Authorization) the client sent on each connection attempt.
 Future<String> runWebSocketServer(
-    {String host = "127.0.0.1", int port = 5600}) async {
+    {String host = "127.0.0.1",
+    int port = 5600,
+    void Function(HttpHeaders headers)? onConnectionHeaders}) async {
   HttpServer server = await HttpServer.bind(host, port);
-  server.transform(WebSocketTransformer()).listen(onWebSocketData);
+  server.listen((HttpRequest request) async {
+    final WebSocket socket = await WebSocketTransformer.upgrade(request);
+    if (onConnectionHeaders != null) {
+      onConnectionHeaders(request.headers);
+    }
+    onWebSocketData(socket);
+  });
   return "ws://$host:$port";
 }
 

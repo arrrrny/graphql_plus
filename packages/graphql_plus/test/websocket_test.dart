@@ -992,4 +992,95 @@ Future<void> main() async {
           emits('mytoken2'));
     });
   });
+
+  group('SocketClient with dynamic headers', () {
+    late SocketClient socketClient;
+    final List<String> serverSeenAuthorization = [];
+    late String wsRecorderUrl;
+    var _token = 'Bearer token-1';
+
+    setUpAll(() async {
+      wsRecorderUrl = await runWebSocketServer(
+        port: 5601,
+        onConnectionHeaders: (headers) {
+          final authorization =
+              headers[HttpHeaders.authorizationHeader]?.first;
+          serverSeenAuthorization.add(authorization ?? '');
+        },
+      );
+    });
+
+    setUp(overridePrint((log) {
+      socketClient = SocketClient(
+        wsRecorderUrl,
+        protocol: GraphQLProtocol.graphqlWs,
+        config: SocketClientConfig(
+          delayBetweenReconnectionAttempts: const Duration(milliseconds: 1),
+          headers: () => {'Authorization': _token},
+          onConnectionLost: (code, reason) async {
+            if (code == 4001) {
+              _token = 'Bearer token-2';
+            }
+
+            return Duration.zero;
+          },
+        ),
+      );
+    }));
+
+    tearDown(overridePrint(
+      (log) => socketClient.dispose(),
+    ));
+
+    test('refreshes authorization header on reconnect', () async {
+      await expectLater(
+        socketClient.connectionState,
+        emitsInOrder([
+          SocketConnectionState.connecting,
+          SocketConnectionState.connected,
+        ]),
+      );
+
+      while (serverSeenAuthorization.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(serverSeenAuthorization.last, 'Bearer token-1');
+
+      Timer(const Duration(milliseconds: 20), () async {
+        socketClient.socketChannel!.sink.add(forceAuthDisconnectCommand);
+      });
+      await expectLater(
+        socketClient.connectionState,
+        emitsInOrder([
+          SocketConnectionState.connected,
+          SocketConnectionState.notConnected,
+          SocketConnectionState.connecting,
+          SocketConnectionState.connected,
+        ]),
+      );
+
+      while (serverSeenAuthorization.length < 2) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(serverSeenAuthorization.last, 'Bearer token-2');
+      expect(serverSeenAuthorization.first, 'Bearer token-1');
+    });
+
+    test('resolvedHeaders accepts literal maps, sync and async callbacks',
+        () async {
+      final literal = SocketClientConfig(headers: {'a': 'b'});
+      expect(await literal.resolvedHeaders, {'a': 'b'});
+
+      final sync = SocketClientConfig(
+          headers: () => {'Authorization': 'Bearer sync'});
+      expect(await sync.resolvedHeaders, {'Authorization': 'Bearer sync'});
+
+      final asyncCfg = SocketClientConfig(
+          headers: () async => {'Authorization': 'Bearer async'});
+      expect(await asyncCfg.resolvedHeaders, {'Authorization': 'Bearer async'});
+
+      final nullHeaders = SocketClientConfig();
+      expect(await nullHeaders.resolvedHeaders, isNull);
+    });
+  });
 }
