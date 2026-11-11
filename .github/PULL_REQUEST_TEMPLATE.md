@@ -6,7 +6,7 @@ There are some simple steps to get your PR merged, that are the following:
 - Make sure that your PR will pass the CI
 - Wait for an review :smile: that will not happen if one of the previous step is missing.
 
-[1](https://github.com/zino-hofmann/graphql-flutter/blob/main/docs/dev/MAINTAINERS.md#commit-style)
+[1](https://github.com/zino-hofmann/graphql-flutter/blob/master/docs/dev/MAINTAINERS.md#commit-style)
 
 <!--
 ### Breaking changes
