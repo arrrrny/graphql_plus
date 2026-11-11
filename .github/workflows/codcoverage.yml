@@ -2,6 +2,38 @@ name: Codecoverage
 
 on:
   push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Install dependencies
+        run: make dep
+      - name: Run coverage (dart)
+        run: make ci_coverage_client
+      - name: Upload coverage (dart)
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: graphql_plus
+      - name: Run coverage (flutter)
+        run: make ci_coverage_flutter
+      - name: Upload coverage (flutter)
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: graphql_flutter_plusname: Codecoverage
+
+on:
+  push:
     branches: [main]
   pull_request:
     branches: [main]
