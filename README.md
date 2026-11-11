@@ -61,7 +61,7 @@ This is a Monorepo which contains the following packages:
 | Crate     | Description |  Version |
 |:----------|:-----------:|--:|
 | [graphql](./packages/graphql) | Client implementation to interact with any graphql server  | ![Pub Version (including pre-releases)](https://img.shields.io/pub/v/graphql?include_prereleases&style=flat-square)  |
-| [graphql_flutter](./packages/graphql_flutter) | Flutter Widgets wrapper around graphql API | ![Pub Version (including pre-releases)](https://img.shields.io/pub/v/graphql_flutter?include_prereleases&style=flat-square) |
+| [graphql_flutter_plus](./packages/graphql_flutter_plus) | Flutter Widgets wrapper around graphql API | ![Pub Version (including pre-releases)](https://img.shields.io/pub/v/graphql_flutter_plus?include_prereleases&style=flat-square) |
 
 ## Utils Tools
 

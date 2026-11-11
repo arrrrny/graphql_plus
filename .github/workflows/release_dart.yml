@@ -9,7 +9,7 @@ on:
     workflows:
       - "Test"
       - "Build"
-    branches: [ main ]
+    branches: [ master ]
     types:
       - completed
 

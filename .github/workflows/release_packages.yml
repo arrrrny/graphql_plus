@@ -31,11 +31,11 @@ jobs:
         # in dry mode because the new release is not on the pub.dev
         # yet
         # TODO: we need to have some bump function for dart in the changelog.dat tool.
-      - name: 'graphql_flutter publish to to Pub.dev'
+      - name: 'graphql_flutter_plus publish to to Pub.dev'
         uses: k-paxian/dart-package-publisher@master
         with:
           credentialJson: ${{ secrets.CREDENTIAL_JSON }}
           flutter: false
           skipTests: true
           dryRunOnly: ${{ github.event_name != 'release' }}
-          relativePath: './packages/graphql_flutter/'
+          relativePath: './packages/graphql_flutter_plus/'
