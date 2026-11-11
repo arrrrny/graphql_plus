@@ -215,8 +215,49 @@ class QueryManager {
       await callback(result);
     }
 
-    /// wait until callbacks complete to rebroadcast
-    maybeRebroadcastQueriesAsync();
+    final refetchQueries = options.refetchQueries;
+    if (refetchQueries == null ||
+        refetchQueries.isEmpty ||
+        result.hasException) {
+      /// wait until callbacks complete to rebroadcast
+      maybeRebroadcastQueriesAsync();
+
+      return result;
+    }
+
+    /// refetches must hit the network, so default a null fetch policy
+    /// to [FetchPolicy.networkOnly]
+    final futures = <Future<QueryResult<Object?>>>[];
+    var i = 0;
+    for (final queryOptions in refetchQueries) {
+      final effectiveOptions = queryOptions.fetchPolicy == null
+          ? queryOptions.copyWithOptions(
+              fetchPolicy: FetchPolicy.networkOnly,
+            )
+          : queryOptions;
+      futures.add(
+        fetchQuery('${_oneOffOpId}-refetch-${i++}', effectiveOptions),
+      );
+    }
+
+    if (options.awaitRefetchQueries == true) {
+      /// refetch failures surface on the mutation future
+      await Future.wait(futures);
+      maybeRebroadcastQueriesAsync();
+    } else {
+      /// fire-and-forget: refetch failures are ignored
+      unawaited(
+        Future.wait<void>(
+          [
+            for (final future in futures)
+              future.then<void>(
+                (dynamic _) {},
+                onError: (Object _) {},
+              ),
+          ],
+        ).whenComplete(maybeRebroadcastQueriesAsync),
+      );
+    }
 
     return result;
   }

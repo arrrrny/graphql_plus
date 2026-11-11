@@ -185,6 +185,11 @@ class GraphQLClient implements GraphQLDataProxy {
 
   /// This resolves a single mutation according to the [MutationOptions] specified and
   /// returns a [Future] which resolves with the [QueryResult] or throws an [Exception].
+  ///
+  /// If [MutationOptions.refetchQueries] is set, each listed [QueryOptions] is
+  /// re-fetched on the network once the mutation settles without exceptions;
+  /// [MutationOptions.awaitRefetchQueries] (default false) controls whether
+  /// the returned future waits for those refetches.
   Future<QueryResult<TParsed>> mutate<TParsed>(
       MutationOptions<TParsed> options) async {
     final policies = defaultPolicies.mutate.withOverrides(options.policies);

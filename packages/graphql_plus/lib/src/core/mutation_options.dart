@@ -29,6 +29,8 @@ class MutationOptions<TParsed extends Object?> extends BaseOptions<TParsed> {
     this.onCompleted,
     this.update,
     this.onError,
+    this.refetchQueries,
+    this.awaitRefetchQueries,
     ResultParserFn<TParsed>? parserFn,
     Duration? queryRequestTimeout,
     CancellationToken? cancellationToken,
@@ -50,12 +52,32 @@ class MutationOptions<TParsed extends Object?> extends BaseOptions<TParsed> {
   final OnMutationUpdate<TParsed>? update;
   final OnError? onError;
 
+  /// Queries to refetch on the network once this mutation settles
+  /// without exceptions.
+  ///
+  /// Mirrors Apollo's `refetchQueries` for `mutate`: each [QueryOptions]
+  /// entry is re-fetched after the mutation completes. An entry with a null
+  /// [QueryOptions.fetchPolicy] is fetched with [FetchPolicy.networkOnly],
+  /// so a `cacheFirst` default cannot turn the refetch into a cache read.
+  ///
+  /// Refetch failures surface on the mutation future only when
+  /// [awaitRefetchQueries] is true, otherwise they are ignored.
+  final List<QueryOptions<Object?>>? refetchQueries;
+
+  /// Whether to wait for all [refetchQueries] futures to resolve before the
+  /// mutation result is returned.
+  ///
+  /// Defaults to false (fire-and-forget), like Apollo.
+  final bool? awaitRefetchQueries;
+
   @override
   List<Object?> get properties => [
         ...super.properties,
         onCompleted,
         update,
         onError,
+        refetchQueries,
+        awaitRefetchQueries,
       ];
 
   /// Generic copyWith for all fields. There is also a more specific option:
@@ -72,6 +94,8 @@ class MutationOptions<TParsed extends Object?> extends BaseOptions<TParsed> {
     OnMutationCompleted? onCompleted,
     OnMutationUpdate<TParsed>? update,
     OnError? onError,
+    List<QueryOptions<Object?>>? refetchQueries,
+    bool? awaitRefetchQueries,
     ResultParserFn<TParsed>? parserFn,
     Duration? queryRequestTimeout,
     CancellationToken? cancellationToken,
@@ -88,6 +112,8 @@ class MutationOptions<TParsed extends Object?> extends BaseOptions<TParsed> {
         onCompleted: onCompleted ?? this.onCompleted,
         update: update ?? this.update,
         onError: onError ?? this.onError,
+        refetchQueries: refetchQueries ?? this.refetchQueries,
+        awaitRefetchQueries: awaitRefetchQueries ?? this.awaitRefetchQueries,
         parserFn: parserFn ?? this.parserFn,
         queryRequestTimeout: queryRequestTimeout ?? this.queryRequestTimeout,
         cancellationToken: cancellationToken ?? this.cancellationToken,
@@ -106,6 +132,8 @@ class MutationOptions<TParsed extends Object?> extends BaseOptions<TParsed> {
         onCompleted: onCompleted,
         update: update,
         onError: onError,
+        refetchQueries: refetchQueries,
+        awaitRefetchQueries: awaitRefetchQueries,
         parserFn: parserFn,
         queryRequestTimeout: queryRequestTimeout,
         cancellationToken: cancellationToken,
