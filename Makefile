@@ -45,10 +45,10 @@ check_client: ci_fmt_client ci_check_client
 check_flutter: ci_fmt_flutter ci_check_flutter
 
 changelog_client:
-	cd packages/graphql && $(CC_CHANGELOG)
+	cd packages/graphql_plus && $(CC_CHANGELOG)
 
 changelog_flutter:
-	cd packages/graphql_flutter && $(CC_CHANGELOG)
+	cd packages/graphql_flutter_plus && $(CC_CHANGELOG)
 
 changelog: changelog_client changelog_flutter
 

@@ -8,7 +8,7 @@ packages:
 
 scripts:
   flutter_analyze:
-    run: melos exec --depends-on="graphql" -c 1 -- "dart format --set-exit-if-changed . && flutter analyze . --fatal-infos"
+    run: melos exec --depends-on="graphql_plus" -c 1 -- "dart format --set-exit-if-changed . && flutter analyze . --fatal-infos"
     description: Run dart analyzer in a specific package.
     select-package:
       flutter: true
@@ -21,7 +21,7 @@ scripts:
 
   flutter_test:
     description: Run tests in a specific package.
-    run: melos exec --depends-on="graphql" -- "flutter test"
+    run: melos exec --depends-on="graphql_plus" -- "flutter test"
     select-package:
       flutter: true
       dir-exists:
@@ -41,7 +41,7 @@ scripts:
 
   flutter_test_coverage:
     description: Run tests in a specific package.
-    run: melos exec --depends-on="graphql" -- "flutter test --coverage"
+    run: melos exec --depends-on="graphql_plus" -- "flutter test --coverage"
     select-package:
       flutter: true
       dir-exists:
