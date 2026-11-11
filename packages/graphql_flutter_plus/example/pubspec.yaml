@@ -25,8 +25,8 @@ flutter:
   uses-material-design: true
 
 dependency_overrides:
-  graphql:
-    path: ../../graphql
+  graphql_plus:
+    path: ../../graphql_plus
 
 environment:
   sdk: '>=2.12.0 <4.0.0'

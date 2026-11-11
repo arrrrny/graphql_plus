@@ -159,20 +159,23 @@ class StarrableRepository extends StatelessWidget {
             ...extractRepositoryData(result.data!)!,
           };
           cache.writeFragment(
-            Fragment(
-              document: gql(
-                '''
+            FragmentRequest(
+              fragment: Fragment(
+                document: gql(
+                  '''
                   fragment fields on Repository {
                     id
                     name
                     viewerHasStarred
                   }
                   ''',
+                ),
               ),
-            ).asRequest(idFields: {
-              '__typename': updated['__typename'],
-              'id': updated['id'],
-            }),
+              idFields: {
+                '__typename': updated['__typename'],
+                'id': updated['id'],
+              },
+            ),
             data: updated,
           );
         }
