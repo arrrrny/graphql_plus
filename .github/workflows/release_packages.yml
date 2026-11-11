@@ -19,7 +19,7 @@ jobs:
           skipTests: true
           force: true
           dryRunOnly: ${{ github.event_name != 'release' }}
-          relativePath: './packages/graphql_plus/'
+          relativePath: './packages/graphql/'
   publishing_flutter:
     runs-on: ubuntu-latest
     needs:
@@ -38,4 +38,4 @@ jobs:
           flutter: false
           skipTests: true
           dryRunOnly: ${{ github.event_name != 'release' }}
-          relativePath: './packages/graphql_flutter_plus/'
+          relativePath: './packages/graphql_flutter/'
