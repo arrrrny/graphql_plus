@@ -1003,8 +1003,7 @@ Future<void> main() async {
       wsRecorderUrl = await runWebSocketServer(
         port: 5601,
         onConnectionHeaders: (headers) {
-          final authorization =
-              headers[HttpHeaders.authorizationHeader]?.first;
+          final authorization = headers[HttpHeaders.authorizationHeader]?.first;
           serverSeenAuthorization.add(authorization ?? '');
         },
       );
@@ -1071,8 +1070,8 @@ Future<void> main() async {
       final literal = SocketClientConfig(headers: {'a': 'b'});
       expect(await literal.resolvedHeaders, {'a': 'b'});
 
-      final sync = SocketClientConfig(
-          headers: () => {'Authorization': 'Bearer sync'});
+      final sync =
+          SocketClientConfig(headers: () => {'Authorization': 'Bearer sync'});
       expect(await sync.resolvedHeaders, {'Authorization': 'Bearer sync'});
 
       final asyncCfg = SocketClientConfig(
