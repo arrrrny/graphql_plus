@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:graphql_flutter/graphql_flutter.dart';
+import 'package:graphql_flutter_plus/graphql_flutter_plus.dart';
 import 'package:starwars_app/utils/graphql_provider.dart';
 
 /// Wraps the root application with the `graphql_flutter` client.

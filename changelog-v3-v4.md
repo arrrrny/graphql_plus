@@ -101,7 +101,7 @@ subscription = client.subscribe(
   ),
 );
 
-// graphql_flutter/graphql_flutter.dart usage
+// graphql_flutter_plus/graphql_flutter_plus.dart usage
 Subscription(
   options: SubscriptionOptions(
     document: subscriptionDocument,
