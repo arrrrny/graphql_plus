@@ -20,7 +20,20 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@v4 # required!
 
+      - name: 'Check publish credentials'
+        id: creds
+        run: |
+          if [ -z "${CREDENTIAL_JSON:-}" ]; then
+            echo "::notice::CREDENTIAL_JSON is not configured; skipping publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          CREDENTIAL_JSON: ${{ secrets.CREDENTIAL_JSON }}
+
       - name: 'publish graphql_plus to Pub.dev'
+        if: steps.creds.outputs.skip == 'false'
         uses: k-paxian/dart-package-publisher@master
         with:
           credentialJson: ${{ secrets.CREDENTIAL_JSON }}
