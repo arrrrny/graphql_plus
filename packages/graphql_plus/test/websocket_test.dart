@@ -1116,4 +1116,50 @@ Future<void> main() async {
       expect(await fallback.resolvedHeaders, {'a': 'b'});
     });
   });
+
+  group('SocketClient graphql-transport-ws keepalive', () {
+    test('keeps pinging a peer that never answers with pong', () async {
+      var pings = 0;
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      addTearDown(() => server.close(force: true));
+
+      server.listen((HttpRequest request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        socket.listen((data) {
+          final message = json.decode(data.toString());
+          switch (message['type']) {
+            case 'connection_init':
+              socket.add(json.encode({'type': 'connection_ack'}));
+              break;
+            case 'ping':
+              // Count it and deliberately never answer with `pong`.
+              pings++;
+              break;
+          }
+        });
+      });
+
+      final client = SocketClient(
+        'ws://127.0.0.1:${server.port}',
+        protocol: GraphQLProtocol.graphqlTransportWs,
+        config: SocketClientConfig(
+          autoReconnect: false,
+          inactivityTimeout: const Duration(milliseconds: 200),
+        ),
+      );
+      addTearDown(client.dispose);
+
+      await client.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
+
+      // Several ping intervals, with no pong ever sent. Before the fix the timer
+      // was one-shot, so exactly one ping was sent and the connection then had no
+      // keepalive at all.
+      await Future<void>.delayed(const Duration(milliseconds: 750));
+
+      expect(pings, greaterThan(1),
+          reason: 'a keepalive must not depend on being acknowledged');
+    });
+  });
 }

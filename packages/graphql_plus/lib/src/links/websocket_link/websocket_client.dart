@@ -454,11 +454,17 @@ class SocketClient {
     );
   }
 
+  /// Sends a keepalive ping every [SocketClientConfig.inactivityTimeout].
+  ///
+  /// Periodic on purpose: a one-shot timer that is only re-armed when a `pong` arrives
+  /// gives up after the first ping if the peer does not answer, leaving the connection
+  /// with no keepalive at all. A peer that never answers pings is exactly the case a
+  /// keepalive exists to survive, so the ping must not depend on being acknowledged.
   void _enqueuePing() {
     _pingTimer?.cancel();
-    _pingTimer = new Timer(
+    _pingTimer = Timer.periodic(
       config.inactivityTimeout!,
-      () => _write(PingMessage(config.pingMessage)),
+      (_) => _write(PingMessage(config.pingMessage)),
     );
   }
 
