@@ -12,6 +12,8 @@ scripts:
     description: Run dart analyzer in a specific package.
     select-package:
       flutter: true
+      scope:
+        - "graphql_flutter_plus"
 
   client_analyze:
     run: melos exec -c 1 -- "dart format --set-exit-if-changed . && dart analyze . --fatal-infos"
@@ -31,7 +33,7 @@ scripts:
 
   client_test:
     description: Run tests in a specific package.
-    run: melos exec -- "dart pub get && dart pub run test"
+    run: melos exec -- "dart pub get && dart test"
     select-package:
       flutter: false
       dir-exists:

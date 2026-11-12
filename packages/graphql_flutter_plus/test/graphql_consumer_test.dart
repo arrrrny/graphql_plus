@@ -1,4 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
+// The Material widgets are the point of these tests; the deprecation of
+// `package:flutter/material.dart` (Flutter 3.47.0+) is an SDK-wide migration that
+// is out of scope for a 5.x patch release.
+// ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 
 import 'package:graphql_flutter_plus/src/widgets/graphql_consumer.dart'

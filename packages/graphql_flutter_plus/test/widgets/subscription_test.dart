@@ -1,5 +1,9 @@
 import 'dart:io';
 
+// The Material widgets are the point of these tests; the deprecation of
+// `package:flutter/material.dart` (Flutter 3.47.0+) is an SDK-wide migration that
+// is out of scope for a 5.x patch release.
+// ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show MethodChannel, MethodCall;
 import 'package:flutter_test/flutter_test.dart';

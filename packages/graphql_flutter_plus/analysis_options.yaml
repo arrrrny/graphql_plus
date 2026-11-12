@@ -1,6 +1,11 @@
 analyzer: 
   exclude:
     - build/**
+    # `example/` is a separate package with its own analysis_options.yaml and its own
+    # dependency set. Analysing it here pulls its deprecations into this package's
+    # gate, which turns `--fatal-infos` red for reasons unrelated to a change under
+    # review (see specs/001-5x-hardening/DESIGN_FAILURES.md, DF-13).
+    - example/**
   language: 
     strict-casts: true
     strict-inference: true

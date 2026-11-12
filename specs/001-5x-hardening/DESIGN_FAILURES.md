@@ -218,17 +218,36 @@ read from an interface.
 
 ## DF-13 — The monorepo's quality gate is unenforceable as written *(operational)*
 
-`melos.yaml` runs `flutter analyze . --fatal-infos` over the whole package including
-`example/` and `test/`. On a Flutter version where `package:flutter/material.dart` is
-deprecated (3.47.0+), that command fails for reasons unrelated to any change under review.
-Separately, `Makefile` declares `flutter:` → `ci_check_flutter` and `ci_fmt_flutter` →
-`client_analyze` — the Flutter format target runs the **client's** analyzer.
+`melos.yaml` ran `flutter analyze . --fatal-infos` across **every** package with
+`flutter: true`, which includes `packages/graphql_flutter_plus/example` (a real melos
+workspace package, `name: app`, with its own `analysis_options.yaml` and a `pedantic` ruleset).
+Its `package:flutter/material.dart` deprecations therefore failed *this* package's gate. Two
+further defects compounded it:
 
-**Why it matters**: a red or wrong gate is worse than no gate, because contributors learn to
-ignore it.
+- `client_test` ran `dart pub get && dart pub run test`. `dart pub run` was removed in Dart
+  3.x, so the script exited non-zero **regardless of the test result** — the log showed
+  `All tests passed!` and the script still reported `FAILED`.
+- `Makefile` declared `ci_fmt_flutter` → `client_analyze`, so the Flutter formatting/analysis
+  target ran the **client's** analyzer and the Flutter package's analysis was never gated.
 
-**6.x resolution**: analyze/test are scoped per package and per tree (`lib/` is fatal, `example/`
-is advisory), and the Makefile targets are corrected.
+`build.yml` runs `make ci_fmt_flutter`, which is how the deprecated-import errors reached
+master unnoticed: the gate that should have caught them was analysing the wrong package.
+
+**Why it matters**: a red-or-wrong gate is worse than no gate, because contributors learn to
+ignore it. Two of the three defects were silent — one reported success as failure, the other
+reported nothing at all.
+
+**6.x resolution**: analyze/test are scoped per package and per tree (`lib/` is fatal,
+`example/` is advisory), and the Makefile targets are corrected.
+
+**Resolved on 5.x** (this release):
+- `Makefile`: `ci_fmt_flutter` now runs `flutter_analyze` instead of `client_analyze`.
+- `melos.yaml`: `flutter_analyze` scoped to `graphql_flutter_plus`; `client_test` uses
+  `dart test` instead of the removed `dart pub run test`.
+- `packages/graphql_flutter_plus/analysis_options.yaml` excludes `example/**`, which is a
+  separate workspace package with its own options.
+- The three test files carry `// ignore: deprecated_member_use` on the
+  `package:flutter/material.dart` import, with the reason recorded inline.
 
 ---
 
@@ -236,7 +255,8 @@ is advisory), and the Makefile targets are corrected.
 
 | Item | Why accepted |
 | --- | --- |
-| `package:flutter/material.dart` in `example/` and `test/` | Material-migration, unrelated to this line; only surfaces on Flutter 3.47.0+ |
+| `package:flutter/material.dart` in `example/` | Material-migration, unrelated to this line; only surfaces on Flutter 3.47.0+. The `example/` tree is excluded from the package analyzer |
+| `package:flutter/material.dart` in `test/` | Same migration; the three imports carry an explicit `// ignore: deprecated_member_use` with the reason, so the gate stays fatal elsewhere |
 | 4 dependencies with newer incompatible versions (`dart pub outdated`) | Constitution forbids dependency upgrades in a patch release |
 | Upstream CHANGELOG history retained verbatim in the fork's CHANGELOGs | Provenance; rewriting it would misrepresent the fork point |
 | `normalize` remaining a dependency | Replacing it is a 6.x rewrite (DF-06), not a patch fix |
@@ -258,4 +278,4 @@ is advisory), and the Makefile targets are corrected.
 | DF-10 | additive `ConnectionState` stream for issue #6 | rewrite |
 | DF-11 | documented | rewrite |
 | DF-12 | none | rewrite |
-| DF-13 | corrected `Makefile` targets (done in this release) | scope the analyzers |
+| DF-13 | **resolved on 5.x**: `Makefile` target fixed, `flutter_analyze` scoped, `dart pub run` removed, `example/**` excluded | keep the scoping |

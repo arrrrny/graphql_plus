@@ -47,11 +47,20 @@ Status legend: `[x]` done in commit `4eee571` · `[ ]` outstanding
 - [x] T025 Ignore `.kimi-code/` and `**/pubspec_overrides.yaml`
 - [x] T026 Commit with a conventional-commit message
 
-## Phase 6 — Outstanding (follow-up specs, not this one)
+## Phase 6 — Quality gate (DF-13)
 
-- [ ] T027 `dart pub publish --dry-run` for `graphql_plus` 5.2.6 (requires the publish
+- [x] T027 Fix `Makefile` `ci_fmt_flutter` to run `flutter_analyze` instead of `client_analyze`
+- [x] T028 Replace the removed `dart pub run test` with `dart test` in `melos.yaml`
+- [x] T029 Scope `flutter_analyze` to `graphql_flutter_plus` so the `app` example package does not gate it
+- [x] T030 Exclude `example/**` from the package analyzer; ignore `deprecated_member_use` on the three test imports
+- [x] T031 Verify all four gates green through melos: `client_analyze`, `client_test`, `flutter_analyze`, `flutter_test`
+- [x] T032 Update `DESIGN_FAILURES.md` (DF-13 marked resolved) and record the analysis change in the widgets CHANGELOG
+
+## Phase 7 — Outstanding (follow-up specs, not this one)
+
+- [ ] T033 `dart pub publish --dry-run` for `graphql_plus` 5.2.6 (requires the publish
   credentials; human-triggered)
-- [ ] T028 `flutter pub publish --dry-run` for `graphql_flutter_plus` 5.3.2
-- [ ] T029 Tag `graphql_plus-v5.2.6` and `graphql_flutter_plus-v5.3.2` and cut GitHub releases
+- [ ] T034 `flutter pub publish --dry-run` for `graphql_flutter_plus` 5.3.2
+- [ ] T035 Tag `graphql_plus-v5.2.6` and `graphql_flutter_plus-v5.3.2` and cut GitHub releases
   (the release workflows listen for these tags)
-- [ ] T030 Spec + implement the four `5.x`-labelled issues: #15, #3, #6, #8
+- [ ] T036 Spec + implement the four `5.x`-labelled issues: #15, #3, #6, #8

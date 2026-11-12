@@ -32,7 +32,7 @@ ci_fmt_client:
 	$(CC) run client_analyze --no-select
 
 ci_fmt_flutter:
-	$(CC) run client_analyze --no-select
+	$(CC) run flutter_analyze --no-select
 
 ci_coverage_client:
 	$(CC) run client_test_coverage --no-select

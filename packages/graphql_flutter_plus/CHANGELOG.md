@@ -1,6 +1,16 @@
 # v5.3.2
 
 ## Fixed
+- The analysis gate no longer fails for reasons unrelated to the library. `melos.yaml`
+  `flutter_analyze` was selecting every `flutter: true` package, which included this
+  package's `example/` app (`name: app`, its own `analysis_options.yaml`); its
+  `package:flutter/material.dart` deprecations failed *this* package's `--fatal-infos`.
+  `example/**` is now excluded from the package analyzer, and the three widget test
+  imports carry an explicit `// ignore: deprecated_member_use`.
+- `melos.yaml` `client_test` used `dart pub run test`, removed in Dart 3.x — it exited
+  non-zero even when every test passed.
+- `Makefile` `ci_fmt_flutter` ran `client_analyze`, so the Flutter analysis target was
+  checking the Dart client. It now runs `flutter_analyze`.
 - Library sources no longer import the deprecated `package:flutter/material.dart`.
   `CacheProvider` and `hive_init.dart` only ever needed `WidgetsFlutterBinding`,
   which lives in `package:flutter/widgets.dart`. On Flutter 3.47.0+ the deprecated
