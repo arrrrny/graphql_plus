@@ -38,6 +38,23 @@ SocketClient getTestClient({
       ),
     );
 
+/// Polls [condition] every 5 ms until it returns true or [timeout] elapses,
+/// failing with a descriptive message instead of spinning until the test
+/// framework's timeout.
+Future<void> waitForCondition(
+  bool Function() condition, {
+  required String message,
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('$message within $timeout');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 Future<void> main() async {
   String wsUrl = await runWebSocketServer();
   group('InitOperation', () {
@@ -1015,7 +1032,7 @@ Future<void> main() async {
         protocol: GraphQLProtocol.graphqlWs,
         config: SocketClientConfig(
           delayBetweenReconnectionAttempts: const Duration(milliseconds: 1),
-          headers: () => {'Authorization': _token},
+          getHeaders: () => {'Authorization': _token},
           onConnectionLost: (code, reason) async {
             if (code == 4001) {
               _token = 'Bearer token-2';
@@ -1040,9 +1057,10 @@ Future<void> main() async {
         ]),
       );
 
-      while (serverSeenAuthorization.isEmpty) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-      }
+      await waitForCondition(
+        () => serverSeenAuthorization.isNotEmpty,
+        message: 'server did not observe the first connection attempt',
+      );
       expect(serverSeenAuthorization.last, 'Bearer token-1');
 
       Timer(const Duration(milliseconds: 20), () async {
@@ -1058,9 +1076,10 @@ Future<void> main() async {
         ]),
       );
 
-      while (serverSeenAuthorization.length < 2) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-      }
+      await waitForCondition(
+        () => serverSeenAuthorization.length >= 2,
+        message: 'server did not observe the reconnect attempt',
+      );
       expect(serverSeenAuthorization.last, 'Bearer token-2');
       expect(serverSeenAuthorization.first, 'Bearer token-1');
     });
@@ -1070,16 +1089,31 @@ Future<void> main() async {
       final literal = SocketClientConfig(headers: {'a': 'b'});
       expect(await literal.resolvedHeaders, {'a': 'b'});
 
-      final sync =
-          SocketClientConfig(headers: () => {'Authorization': 'Bearer sync'});
+      final sync = SocketClientConfig(
+          getHeaders: () => {'Authorization': 'Bearer sync'});
       expect(await sync.resolvedHeaders, {'Authorization': 'Bearer sync'});
 
       final asyncCfg = SocketClientConfig(
-          headers: () async => {'Authorization': 'Bearer async'});
+          getHeaders: () async => {'Authorization': 'Bearer async'});
       expect(await asyncCfg.resolvedHeaders, {'Authorization': 'Bearer async'});
 
       final nullHeaders = SocketClientConfig();
       expect(await nullHeaders.resolvedHeaders, isNull);
+    });
+
+    test('getHeaders result takes precedence over literal headers', () async {
+      final precedence = SocketClientConfig(
+        headers: {'a': 'b'},
+        getHeaders: () => {'Authorization': 'Bearer fresh'},
+      );
+      expect(
+          await precedence.resolvedHeaders, {'Authorization': 'Bearer fresh'});
+
+      final fallback = SocketClientConfig(
+        headers: {'a': 'b'},
+        getHeaders: () => null,
+      );
+      expect(await fallback.resolvedHeaders, {'a': 'b'});
     });
   });
 }
