@@ -1120,13 +1120,11 @@ Future<void> main() async {
   group('SocketClient keepalive watchdog', () {
     Future<HttpServer> startServer({
       required void Function(WebSocket socket, dynamic data) onMessage,
-      void Function(WebSocket socket)? onUpgrade,
     }) async {
       final server = await HttpServer.bind('127.0.0.1', 0);
       addTearDown(() => server.close(force: true));
       server.listen((HttpRequest request) async {
         final socket = await WebSocketTransformer.upgrade(request);
-        onUpgrade?.call(socket);
         socket.listen((data) => onMessage(socket, data));
       });
       return server;
@@ -1219,6 +1217,59 @@ Future<void> main() async {
         kaTimer?.cancel();
 
         // The watchdog must still fire once the peer stops sending keepalives.
+        await expectLater(
+          client.connectionState
+              .where((state) => state == SocketConnectionState.notConnected)
+              .first
+              .timeout(const Duration(seconds: 5)),
+          completion(SocketConnectionState.notConnected),
+        );
+      },
+    );
+
+    test(
+      'graphql-ws: a peer whose first ConnectionKeepAlive arrives late is still closed',
+      () async {
+        // The first ka lands after inactivityTimeout. `Stream.timeout` would have fired
+        // and closed its own stream here, permanently disarming the watchdog, so a
+        // later death would go unnoticed. A resettable timer must arm on that first ka.
+        Timer? kaTimer;
+        final server = await startServer(
+          onMessage: (socket, data) {
+            final message = json.decode(data.toString());
+            if (message['type'] == 'connection_init') {
+              socket.add(json.encode({'type': 'connection_ack'}));
+              kaTimer = Timer(const Duration(milliseconds: 500), () {
+                socket.add(json.encode({'type': 'ka'}));
+                // Then every 50ms, so the watchdog is demonstrably armed.
+                kaTimer = Timer.periodic(
+                  const Duration(milliseconds: 50),
+                  (_) => socket.add(json.encode({'type': 'ka'})),
+                );
+              });
+            }
+          },
+        );
+        addTearDown(() => kaTimer?.cancel());
+
+        final client = SocketClient(
+          'ws://127.0.0.1:${server.port}',
+          protocol: GraphQLProtocol.graphqlWs,
+          config: SocketClientConfig(
+            autoReconnect: false,
+            inactivityTimeout: const Duration(milliseconds: 200),
+          ),
+        );
+        addTearDown(client.dispose);
+
+        await client.connectionState
+            .where((state) => state == SocketConnectionState.connected)
+            .first;
+
+        // Let the late first ka land and the watchdog arm, then stop the keepalives.
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+        kaTimer?.cancel();
+
         await expectLater(
           client.connectionState
               .where((state) => state == SocketConnectionState.notConnected)

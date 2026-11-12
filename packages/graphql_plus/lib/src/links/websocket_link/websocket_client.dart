@@ -69,6 +69,10 @@ class SocketClientConfig {
   /// was received from the server in the given time-frame. The connection to the server will be closed.
   /// If [autoReconnect] is set to true, we try to reconnect to the server after the specified [delayBetweenReconnectionAttempts].
   ///
+  /// Under the legacy `graphql-ws` subprotocol this is only enforced once the peer has sent at least
+  /// one keep alive message, so a server that never sends one (Apollo Server 3+, NestJS) is not
+  /// force-closed.
+  ///
   /// If null, the keep alive messages will be ignored.
   final Duration? inactivityTimeout;
 
@@ -278,6 +282,7 @@ class SocketClient {
   Stream<GraphQLSocketMessage> get _messages => socketChannel!.messages;
 
   StreamSubscription<ConnectionKeepAlive>? _keepAliveSubscription;
+  Timer? _keepAliveTimer;
   StreamSubscription<GraphQLSocketMessage>? _messageSubscription;
 
   Map<String, dynamic> Function(Request) get serialize =>
@@ -316,18 +321,20 @@ class SocketClient {
     // silence as death once the peer has demonstrated it does send them — otherwise a
     // healthy but idle subscription is force-closed every inactivityTimeout and
     // auto-reconnected forever, which is the infinite connect/disconnect loop in #15.
-    var sawKeepAlive = false;
-
-    _keepAliveSubscription = messages.whereType<ConnectionKeepAlive>().timeout(
-      config.inactivityTimeout!,
-      onTimeout: (EventSink<ConnectionKeepAlive> event) {
-        event.close();
-        if (sawKeepAlive) {
-          unawaited(_closeSocketChannel());
-        }
-      },
-    ).listen((_) {
-      sawKeepAlive = true;
+    //
+    // A resettable Timer rather than Stream.timeout: timeout() closes its output stream
+    // when onTimeout runs, which would tear down the only liveness monitor and leave the
+    // watchdog permanently disarmed after its first firing.
+    _keepAliveSubscription?.cancel();
+    _keepAliveSubscription =
+        messages.whereType<ConnectionKeepAlive>().listen((_) {
+      // The peer has shown it sends keepalives: from here on, silence means death.
+      // dart:async has no Timer.reset, so re-arm by cancel-and-recreate.
+      _keepAliveTimer?.cancel();
+      _keepAliveTimer = Timer(
+        config.inactivityTimeout!,
+        () => unawaited(_closeSocketChannel()),
+      );
     });
   }
 
@@ -435,6 +442,8 @@ class SocketClient {
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
     _keepAliveSubscription?.cancel();
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
     _messageSubscription?.cancel();
 
     //TODO: do we really need this check here because few lines bellow there is another check
@@ -487,6 +496,8 @@ class SocketClient {
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
     _keepAliveSubscription?.cancel();
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
     _unsubscriber.close();
 
     await Future.wait([

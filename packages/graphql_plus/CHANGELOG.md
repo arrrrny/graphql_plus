@@ -8,7 +8,8 @@
   keepalives — Apollo Server 3+, NestJS — therefore had every healthy but idle subscription
   closed and auto-reconnected forever. The watchdog is now armed only after the peer has
   demonstrated it sends keepalives, so a peer that never sends them is left alone while
-  dead-connection detection is preserved for peers that do.
+  dead-connection detection is preserved for any peer that sends at least one: the watchdog is
+  (re)armed on every keepalive, however late the first one arrives.
   - The issue title blames a `content-length: 0` handshake header. That does not reproduce on
     Dart 3.14: the handshake `dart:io` sends was captured and contains no `content-length`
     header at all. The keepalive watchdog is the actual cause.
