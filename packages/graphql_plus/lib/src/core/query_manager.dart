@@ -228,15 +228,14 @@ class QueryManager {
     /// refetches must hit the network, so default a null fetch policy
     /// to [FetchPolicy.networkOnly]
     final futures = <Future<QueryResult<Object?>>>[];
-    var i = 0;
-    for (final queryOptions in refetchQueries) {
+    for (final (i, queryOptions) in refetchQueries.indexed) {
       final effectiveOptions = queryOptions.fetchPolicy == null
           ? queryOptions.copyWithOptions(
               fetchPolicy: FetchPolicy.networkOnly,
             )
           : queryOptions;
       futures.add(
-        fetchQuery('${_oneOffOpId}-refetch-${i++}', effectiveOptions),
+        fetchQuery('${_oneOffOpId}-refetch-$i', effectiveOptions),
       );
     }
 
