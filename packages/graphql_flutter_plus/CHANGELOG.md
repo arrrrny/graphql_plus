@@ -24,7 +24,12 @@
   dead third-party badges; all relative links to the client package now point at
   `../graphql_plus/README.md`.
 
-# v5.3.1 (fork)
+# v5.3.1 (fork — never published)
+
+> **Not released.** This entry described a fork release that was never uploaded to
+> pub.dev: `GET https://pub.dev/api/packages/graphql_flutter_plus` returned 404
+> until 5.3.2 was published on 2026-11-12. Kept for provenance; **5.3.2 is the
+> first published version of this package.**
 
 `graphql_flutter_plus` is the actively maintained fork of `graphql_flutter` 5.3.0
 (zino-hofmann/graphql-flutter), rebuilt on `graphql_plus` ^5.2.5.
