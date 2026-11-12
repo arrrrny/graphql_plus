@@ -1116,4 +1116,117 @@ Future<void> main() async {
       expect(await fallback.resolvedHeaders, {'a': 'b'});
     });
   });
+
+  group('SocketClient keepalive watchdog', () {
+    Future<HttpServer> startServer({
+      required void Function(WebSocket socket, dynamic data) onMessage,
+      void Function(WebSocket socket)? onUpgrade,
+    }) async {
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((HttpRequest request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        onUpgrade?.call(socket);
+        socket.listen((data) => onMessage(socket, data));
+      });
+      return server;
+    }
+
+    test(
+      'graphql-ws: a peer that never sends ConnectionKeepAlive is left connected',
+      () async {
+        final server = await startServer(
+          onMessage: (socket, data) {
+            final message = json.decode(data.toString());
+            if (message['type'] == 'connection_init') {
+              socket.add(json.encode({'type': 'connection_ack'}));
+            }
+            // Deliberately never sends {"type": "ka"} — the Apollo Server 3+/NestJS case.
+          },
+        );
+
+        final client = SocketClient(
+          'ws://127.0.0.1:${server.port}',
+          protocol: GraphQLProtocol.graphqlWs,
+          config: SocketClientConfig(
+            autoReconnect: false,
+            inactivityTimeout: const Duration(milliseconds: 200),
+          ),
+        );
+        addTearDown(client.dispose);
+
+        await client.connectionState
+            .where((state) => state == SocketConnectionState.connected)
+            .first;
+
+        // Well past the inactivity timeout. Before the fix the watchdog force-closed
+        // the socket here, which with autoReconnect on produces the connect/disconnect
+        // loop reported in #15. `closeCode` is not a usable signal (it is not set
+        // synchronously on a local close), so assert on the connection state instead.
+        var sawDisconnect = false;
+        final subscription = client.connectionState.listen((state) {
+          if (state == SocketConnectionState.notConnected) {
+            sawDisconnect = true;
+          }
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        await subscription.cancel();
+
+        expect(sawDisconnect, isFalse,
+            reason: 'a healthy but idle connection must not be force-closed');
+      },
+    );
+
+    test(
+      'graphql-ws: a peer whose ConnectionKeepAlive stops is still closed',
+      () async {
+        Timer? kaTimer;
+        var stopKeepAlives = false;
+        final server = await startServer(
+          onMessage: (socket, data) {
+            final message = json.decode(data.toString());
+            if (message['type'] == 'connection_init') {
+              // Created before the ack, so the timer exists by the time the test
+              // observes `connected` and can cancel it deterministically.
+              kaTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+                if (!stopKeepAlives) {
+                  socket.add(json.encode({'type': 'ka'}));
+                }
+              });
+              socket.add(json.encode({'type': 'connection_ack'}));
+            }
+          },
+        );
+        addTearDown(() => kaTimer?.cancel());
+
+        final client = SocketClient(
+          'ws://127.0.0.1:${server.port}',
+          protocol: GraphQLProtocol.graphqlWs,
+          config: SocketClientConfig(
+            autoReconnect: false,
+            inactivityTimeout: const Duration(milliseconds: 400),
+          ),
+        );
+        addTearDown(client.dispose);
+
+        await client.connectionState
+            .where((state) => state == SocketConnectionState.connected)
+            .first;
+
+        // Let a few keepalives through so the watchdog arms, then stop them.
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        stopKeepAlives = true;
+        kaTimer?.cancel();
+
+        // The watchdog must still fire once the peer stops sending keepalives.
+        await expectLater(
+          client.connectionState
+              .where((state) => state == SocketConnectionState.notConnected)
+              .first
+              .timeout(const Duration(seconds: 5)),
+          completion(SocketConnectionState.notConnected),
+        );
+      },
+    );
+  });
 }

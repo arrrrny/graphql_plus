@@ -311,13 +311,24 @@ class SocketClient {
   }
 
   void _disconnectOnKeepAliveTimeout(Stream<GraphQLSocketMessage> messages) {
+    // A peer that sends no ConnectionKeepAlive is not necessarily dead: many servers
+    // (Apollo Server 3+, NestJS) simply do not use protocol keepalives. Only treat
+    // silence as death once the peer has demonstrated it does send them — otherwise a
+    // healthy but idle subscription is force-closed every inactivityTimeout and
+    // auto-reconnected forever, which is the infinite connect/disconnect loop in #15.
+    var sawKeepAlive = false;
+
     _keepAliveSubscription = messages.whereType<ConnectionKeepAlive>().timeout(
       config.inactivityTimeout!,
       onTimeout: (EventSink<ConnectionKeepAlive> event) {
         event.close();
-        unawaited(_closeSocketChannel());
+        if (sawKeepAlive) {
+          unawaited(_closeSocketChannel());
+        }
       },
-    ).listen(null);
+    ).listen((_) {
+      sawKeepAlive = true;
+    });
   }
 
   Future<void> _closeSocketChannel() async {
