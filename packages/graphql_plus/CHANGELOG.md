@@ -1,5 +1,15 @@
 # Unreleased
 
+## Added
+- **`WebSocketLink.connectionState`** — a stable `Stream<SocketConnectionState>` on the link, so
+  an app can tell that a subscription's connection dropped without reaching into `SocketClient`
+  (closes #6, upstream graphql-flutter#1188). `SocketClient` is disposed and rebuilt on every
+  `connectOrReconnect()`, so a caller that subscribed to `getSocketClient!.connectionState` was
+  bound to an instance that was about to be discarded — exactly when the signal is needed. The
+  link now owns the stream and keeps forwarding across rebuilds. Seeds with `notConnected` before
+  the first connection, supports multiple listeners, and closes on `dispose()`. Additive: no
+  existing signature, default, or export changes.
+
 ## Fixed
 - **A partial `optimisticResult` no longer blanks cache fields it omits** (closes #3,
   upstream graphql-flutter#1118). `normalize` emits an explicit `null` for every selected

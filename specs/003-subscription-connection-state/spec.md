@@ -1,131 +1,132 @@
-# Feature Specification: [FEATURE NAME]
+# Feature Specification: Expose subscription connection state
 
-**Feature Branch**: `[###-feature-name]`
+**Feature Branch**: `003-subscription-connection-state`
 
-**Created**: [DATE]
+**Created**: 2026-11-13
 
 **Status**: Draft
 
-**Input**: User description: "$ARGUMENTS"
+**Input**: "Expose a way to detect when a subscription connection is lost" —
+https://github.com/arrrrny/graphql_plus/issues/6 (mirrors upstream `graphql-flutter#1188`)
 
 ## User Scenarios & Testing *(mandatory)*
 
-<!--
-  IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
-  Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
-  you should still have a viable MVP (Minimum Viable Product) that delivers value.
+### User Story 1 - An app learns the subscription dropped (Priority: P1)
 
-  Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
-  Think of each story as a standalone slice of functionality that can be:
-  - Developed independently
-  - Tested independently
-  - Deployed independently
-  - Demonstrated to users independently
--->
+An app with an open subscription is backgrounded, the device sleeps, or the network drops. The
+subscription stops delivering events. The app can observe that the connection left `connected`
+and is now reconnecting or disconnected, and refetch the data it was showing.
 
-### User Story 1 - [Brief Title] (Priority: P1)
+**Why this priority**: it is the whole point of the request. Without it, a subscription that
+silently stops delivering events leaves the app serving stale data with no signal at all — the
+exact failure the issue describes.
 
-[Describe this user journey in plain language]
-
-**Why this priority**: [Explain the value and why it has this priority level]
-
-**Independent Test**: [Describe how this can be tested independently - e.g., "Can be fully tested by [specific action] and delivers [specific value]"]
+**Independent Test**: a widget or unit test connects a `WebSocketLink` to a server, asserts
+`connected`, kills the server, and asserts the exposed stream reports the loss without any
+application code reaching into the socket client.
 
 **Acceptance Scenarios**:
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-2. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **Given** a connected subscription, **When** the server closes the socket, **Then** the
+   exposed connection state stream emits a state that is not `connected`.
+2. **Given** a connection that was lost, **When** the client reconnects, **Then** the stream
+   emits `connecting` and then `connected` again.
+3. **Given** the app, **When** it reads the connection state, **Then** it needs no knowledge of
+   `SocketClient`, no null check, and no cast.
 
 ---
 
-### User Story 2 - [Brief Title] (Priority: P2)
+### User Story 2 - The connection state survives a reconnect (Priority: P1)
 
-[Describe this user journey in plain language]
+`WebSocketLink.connectOrReconnect()` disposes the old `SocketClient` and builds a new one. An
+app that subscribed to connection state before that call must keep receiving events after it,
+on the same stream.
 
-**Why this priority**: [Explain the value and why it has this priority level]
+**Why this priority**: this is the defect that makes the naive implementation useless. A stream
+bound to a `SocketClient` instance dies the moment the link rebuilds it, which is precisely
+when the app needs the signal.
 
-**Independent Test**: [Describe how this can be tested independently]
+**Independent Test**: subscribe to the link's connection state, call `connectOrReconnect()`,
+then close the new socket and assert the original subscription observes the loss.
 
 **Acceptance Scenarios**:
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **Given** a subscription made before `connectOrReconnect()`, **When** the link rebuilds its
+   socket client, **Then** the original subscription is not closed and keeps forwarding.
+2. **Given** repeated reconnects, **When** the link rebuilds several times, **Then** each
+   rebuild's events are forwarded on the same stream with no duplicated or missed states.
 
 ---
 
-### User Story 3 - [Brief Title] (Priority: P3)
+### User Story 3 - The existing public surface keeps working (Priority: P2)
 
-[Describe this user journey in plain language]
+Applications that already use `SocketClient.connectionState` directly, or `WebSocketLink.getSocketClient`,
+are unaffected.
 
-**Why this priority**: [Explain the value and why it has this priority level]
+**Why this priority**: this is a `5.x` change and the constitution forbids breaking the published
+API. The new accessor is additive.
 
-**Independent Test**: [Describe how this can be tested independently]
+**Independent Test**: the existing websocket test suite passes unchanged.
 
 **Acceptance Scenarios**:
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **Given** the existing test suite, **When** it runs, **Then** every test still passes.
+2. **Given** a caller using `getSocketClient`, **When** the link reconnects, **Then** the
+   behaviour of `getSocketClient` is unchanged (it still returns the current instance).
 
 ---
-
-[Add more user stories as needed, each with an assigned priority]
 
 ### Edge Cases
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right edge cases.
--->
-
-- What happens when [boundary condition]?
-- How does system handle [error scenario]?
+- **No socket client yet.** `WebSocketLink` connects lazily on the first request. Reading the
+  connection state before any request must yield `notConnected` rather than throwing or hanging.
+- **Disposed link.** After `dispose()`, the stream closes; a late read must not throw.
+- **Multiple listeners.** Two apps listening to the same link must both receive events.
+- **A connect attempt that fails before reaching `connected`.** The app should see the failure
+  state rather than a silent gap.
 
 ## Requirements *(mandatory)*
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right functional requirements.
--->
-
 ### Functional Requirements
 
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
-- **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
-- **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-001**: `WebSocketLink` MUST expose a `connectionState` stream of `SocketConnectionState`
+  that reflects the current connection without requiring the caller to reach into `SocketClient`.
+- **FR-002**: The exposed stream MUST remain valid across `connectOrReconnect()`; a subscription
+  made before a rebuild MUST keep receiving events after it.
+- **FR-003**: Reading the connection state before the first connection MUST emit
+  `SocketConnectionState.notConnected` and MUST NOT throw or block.
+- **FR-004**: After `dispose()`, the exposed stream MUST close and MUST NOT throw on late reads.
+- **FR-005**: The stream MUST support multiple simultaneous listeners.
+- **FR-006**: The change MUST be additive: no existing signature, default, or export changes.
+- **FR-007**: A state change MUST be observable at the moment it happens, not only by polling.
 
-*Example of marking unclear requirements:*
+### Key Entities
 
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
-
-### Key Entities *(include if feature involves data)*
-
-- **[Entity 1]**: [What it represents, key attributes without implementation]
-- **[Entity 2]**: [What it represents, relationships to other entities]
+- **`SocketConnectionState`** (existing) — `notConnected`, `handshake`, `connecting`, `connected`.
+- **`WebSocketLink.connectionState`** (new) — a stable broadcast stream of the above.
 
 ## Success Criteria *(mandatory)*
 
-<!--
-  ACTION REQUIRED: Define measurable success criteria.
-  These must be technology-agnostic and measurable.
--->
-
 ### Measurable Outcomes
 
-- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
-- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
-- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
-- **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+- **SC-001**: A test observes the connection loss through the link alone, with no reference to
+  `SocketClient`.
+- **SC-002**: A subscription created before `connectOrReconnect()` still receives events after
+  it (no test previously covered this).
+- **SC-003**: The full existing websocket suite passes unchanged.
+- **SC-004**: `dart analyze --fatal-infos` is clean.
 
 ## Assumptions
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right assumptions based on reasonable defaults
-  chosen when the feature description did not specify certain details.
--->
+- The existing four-state enum is sufficient; a dedicated "reconnected" value would be a
+  breaking change and is out of scope. A `connected → connecting → connected` sequence conveys
+  reconnection.
+- Applications poll or listen; no Flutter widget is added in this change.
+- `SocketClient.connectionState` remains public and unchanged.
 
-- [Assumption about target users, e.g., "Users have stable internet connectivity"]
-- [Assumption about scope boundaries, e.g., "Mobile support is out of scope for v1"]
-- [Assumption about data/environment, e.g., "Existing authentication system will be reused"]
-- [Dependency on existing system/service, e.g., "Requires access to the existing user profile API"]
+## Out of Scope
+
+- Auto-refetch on reconnect (the issue's suggested "documented pattern"; this feature provides
+  the signal, not the policy).
+- Adding states to `SocketConnectionState`.
+- A Flutter-level widget or hook.

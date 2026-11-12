@@ -1280,4 +1280,103 @@ Future<void> main() async {
       },
     );
   });
-}
+
+  group('WebSocketLink.connectionState', () {
+    Future<({HttpServer server, List<WebSocket> sockets})>
+        startLinkServer() async {
+      final sockets = <WebSocket>[];
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      server.listen((HttpRequest request) async {
+        final socket = await WebSocketTransformer.upgrade(request);
+        sockets.add(socket);
+        socket.listen(
+          (data) {
+            final message = json.decode(data.toString());
+            if (message['type'] == 'connection_init') {
+              try {
+                socket.add(json.encode({'type': 'connection_ack'}));
+              } on StateError catch (_) {
+                // The test already closed this socket; the peer is gone.
+              }
+            }
+          },
+          onError: (_) {},
+        );
+      });
+      addTearDown(() => server.close(force: true));
+      return (server: server, sockets: sockets);
+    }
+
+    test('reports notConnected before the first connection', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink('ws://127.0.0.1:${harness.server.port}');
+      addTearDown(link.dispose);
+
+      expect(
+        await link.connectionState.first,
+        SocketConnectionState.notConnected,
+      );
+    });
+
+    test('reports the loss without the caller touching SocketClient', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink(
+        'ws://127.0.0.1:${harness.server.port}',
+        config: const SocketClientConfig(autoReconnect: false),
+      );
+      addTearDown(link.dispose);
+
+      link.connectOrReconnect();
+      await link.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
+
+      // The server drops the socket — the app must learn without reaching into
+      // SocketClient. autoReconnect is off so the loss is observable and stable.
+      await harness.sockets.first.close();
+
+      await expectLater(
+        link.connectionState
+            .where((state) => state != SocketConnectionState.connected)
+            .first
+            .timeout(const Duration(seconds: 5)),
+        completion(isNot(SocketConnectionState.connected))),
+      );
+    });
+
+    test('a subscription survives connectOrReconnect', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink('ws://127.0.0.1:${harness.server.port}');
+      addTearDown(link.dispose);
+
+      final seen = <SocketConnectionState>[];
+      final subscription = link.connectionState.listen(seen.add);
+
+      link.connectOrReconnect();
+      await link.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
+
+      final countBeforeRebuild = seen.length;
+      link.connectOrReconnect();
+      await link.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
+
+      expect(seen.length, greaterThan(countBeforeRebuild),
+          reason:
+              'the original subscription must keep receiving after a rebuild');
+      await subscription.cancel();
+    });
+
+    test('closes after dispose', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink('ws://127.0.0.1:${harness.server.port}');
+
+      final done = link.connectionState.toList();
+      await link.dispose();
+
+      await done.timeout(const Duration(seconds: 5));
+    });
+  });
+});
