@@ -78,7 +78,8 @@ void main() {
     });
 
     try {
-      final link = CancellableHttpLink('http://localhost:${server.port}/graphql');
+      final link =
+          CancellableHttpLink('http://localhost:${server.port}/graphql');
       final client = GraphQLClient(cache: getTestCache(), link: link);
 
       try {
