@@ -215,8 +215,52 @@ class QueryManager {
       await callback(result);
     }
 
-    /// wait until callbacks complete to rebroadcast
-    maybeRebroadcastQueriesAsync();
+    final refetchQueries = options.refetchQueries;
+    if (refetchQueries == null ||
+        refetchQueries.isEmpty ||
+        result.hasException) {
+      /// wait until callbacks complete to rebroadcast
+      maybeRebroadcastQueriesAsync();
+
+      return result;
+    }
+
+    /// refetches must hit the network, so default a null fetch policy
+    /// to [FetchPolicy.networkOnly]
+    final futures = <Future<QueryResult<Object?>>>[];
+    for (final (i, queryOptions) in refetchQueries.indexed) {
+      final effectiveOptions = queryOptions.fetchPolicy == null
+          ? queryOptions.copyWithOptions(
+              fetchPolicy: FetchPolicy.networkOnly,
+            )
+          : queryOptions;
+      futures.add(
+        fetchQuery('${_oneOffOpId}-refetch-$i', effectiveOptions),
+      );
+    }
+
+    if (options.awaitRefetchQueries == true) {
+      /// refetch failures surface on the mutation future
+      final results = await Future.wait(futures);
+      final failures = results.where((r) => r.hasException).toList();
+      if (failures.isNotEmpty) {
+        throw failures.first.exception!;
+      }
+      maybeRebroadcastQueriesAsync();
+    } else {
+      /// fire-and-forget: refetch failures are ignored
+      unawaited(
+        Future.wait<void>(
+          [
+            for (final future in futures)
+              future.then<void>(
+                (dynamic _) {},
+                onError: (Object _) {},
+              ),
+          ],
+        ).whenComplete(maybeRebroadcastQueriesAsync),
+      );
+    }
 
     return result;
   }
