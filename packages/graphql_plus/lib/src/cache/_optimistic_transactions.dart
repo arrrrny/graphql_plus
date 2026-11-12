@@ -75,13 +75,36 @@ class OptimisticProxy extends NormalizingDataProxy {
   /// Called from [writeQuery] and [writeFragment].
   @override
   void writeNormalized(String dataId, Map<String, dynamic>? value) {
-    if (value is Map<String, Object>) {
-      final existing = data[dataId];
-      data[dataId] =
-          existing != null ? deeplyMergeLeft([existing, value]) : value;
-    } else {
-      data[dataId] = value;
+    if (value == null) {
+      data[dataId] = null;
+      return;
     }
+    // `normalize` emits an explicit `null` for every selected field that a partial
+    // optimistic payload omitted (see [acceptPartialData]). Recording those nulls
+    // lets an omitted field overwrite the value already in the store when the patch
+    // is merged in `GraphQLCache.readNormalized`, which blanks fields the caller
+    // never mentioned. Dropping them makes an absent field a no-op rather than a
+    // clear, which is the documented optimistic-merge semantic.
+    final patch = _withoutNulls(value);
+    final existing = data[dataId];
+    data[dataId] =
+        existing != null ? deeplyMergeLeft([existing, patch]) : patch;
+  }
+
+  /// Returns a copy of [value] with every `null`-valued entry removed, recursively.
+  ///
+  /// Only `null` leaves are dropped; `false`, `0` and `''` are real values and are kept.
+  /// A map whose entries are all null collapses to an empty map, which merges as a no-op.
+  static Map<String, dynamic> _withoutNulls(Map<String, dynamic> value) {
+    final result = <String, dynamic>{};
+    value.forEach((key, entry) {
+      if (entry == null) {
+        return;
+      }
+      result[key] =
+          entry is Map<String, dynamic> ? _withoutNulls(entry) : entry;
+    });
+    return result;
   }
 
   OptimisticPatch asPatch(String id) => OptimisticPatch(id, data);

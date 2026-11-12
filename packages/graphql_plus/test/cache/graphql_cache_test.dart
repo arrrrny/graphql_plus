@@ -1,8 +1,11 @@
+import 'package:gql_exec/gql_exec.dart' show Request;
 import 'package:graphql_plus/src/cache/_normalizing_data_proxy.dart';
 import 'package:normalize/normalize.dart' show PartialDataException;
 import 'package:test/test.dart';
 
+import 'package:graphql_plus/graphql_plus.dart' show Operation;
 import 'package:graphql_plus/src/cache/cache.dart';
+import 'package:graphql_plus/src/utilities/helpers.dart' show gql;
 
 import '../helpers.dart';
 import './cache_data.dart';
@@ -296,6 +299,223 @@ void main() {
       );
     },
   );
+
+  group('Partial optimistic writes', () {
+    late GraphQLCache cache;
+
+    // Not getTestCache(): TestCache pins partialDataPolicy to `reject`, which throws
+    // before the merge is reached. The partial-write path only exists under the
+    // production default (`acceptForOptimisticData`), so that is what is under test.
+    setUp(() {
+      cache = GraphQLCache();
+    });
+
+    /// A mutation whose selection set covers `name` and `friendStatus`, used with a
+    /// payload that only supplies `friendStatus` — the shape reported in #3.
+    Request partialFriendStatusRequest() => Request(
+          operation: Operation(
+            document: gql(r'''
+              mutation UpdateFriendStatus($id: ID!) {
+                updateFriendStatus(id: $id) {
+                  __typename
+                  id
+                  name
+                  friendStatus
+                }
+              }
+            '''),
+          ),
+          variables: {'id': '123'},
+        );
+
+    Map<String, dynamic> partialFriendStatusData() => {
+          '__typename': 'Mutation',
+          'updateFriendStatus': {
+            '__typename': 'User',
+            'id': '123',
+            'friendStatus': 'SENT_PENDING',
+          },
+        };
+
+    test('an omitted field keeps its cached value', () {
+      cache.writeNormalized('User:123', {
+        '__typename': 'User',
+        'id': '123',
+        'name': 'kyle',
+        'friendStatus': 'NOT_FRIENDS',
+      });
+
+      cache.recordOptimisticTransaction(
+        (proxy) {
+          proxy.writeQuery(
+            partialFriendStatusRequest(),
+            data: partialFriendStatusData(),
+          );
+          return proxy;
+        },
+        '1',
+      );
+
+      expect(
+        cache.readNormalized('User:123'),
+        equals({
+          '__typename': 'User',
+          'id': '123',
+          'name': 'kyle',
+          'friendStatus': 'SENT_PENDING',
+        }),
+      );
+    });
+
+    test('an explicitly provided field still overwrites', () {
+      cache.writeNormalized('User:123', {
+        '__typename': 'User',
+        'id': '123',
+        'name': 'kyle',
+        'friendStatus': 'NOT_FRIENDS',
+      });
+
+      cache.recordOptimisticTransaction(
+        (proxy) {
+          proxy.writeQuery(
+            partialFriendStatusRequest(),
+            data: partialFriendStatusData(),
+          );
+          return proxy;
+        },
+        '1',
+      );
+
+      expect(
+        cache.readNormalized('User:123')!['friendStatus'],
+        'SENT_PENDING',
+      );
+    });
+
+    test('false and 0 are values, not omissions', () {
+      cache.writeNormalized('User:123', {
+        '__typename': 'User',
+        'id': '123',
+        'isBlocked': true,
+        'loginCount': 7,
+      });
+
+      cache.recordOptimisticTransaction(
+        (proxy) {
+          proxy.writeQuery(
+            Request(
+              operation: Operation(
+                document: gql(r'''
+                  mutation BlockUser($id: ID!) {
+                    blockUser(id: $id) {
+                      __typename
+                      id
+                      isBlocked
+                      loginCount
+                    }
+                  }
+                '''),
+              ),
+              variables: {'id': '123'},
+            ),
+            data: {
+              '__typename': 'Mutation',
+              'blockUser': {
+                '__typename': 'User',
+                'id': '123',
+                'isBlocked': false,
+                'loginCount': 0,
+              },
+            },
+          );
+          return proxy;
+        },
+        '1',
+      );
+
+      final read = cache.readNormalized('User:123')!;
+      expect(read['isBlocked'], isFalse);
+      expect(read['loginCount'], 0);
+    });
+
+    test('a nested entity keeps the fields the payload omitted', () {
+      cache.writeNormalized('User:123', {
+        '__typename': 'User',
+        'id': '123',
+        'profile': {'__typename': 'Profile', 'id': 'p1'},
+      });
+      cache.writeNormalized('Profile:p1', {
+        '__typename': 'Profile',
+        'id': 'p1',
+        'bio': 'hi',
+      });
+
+      cache.recordOptimisticTransaction(
+        (proxy) {
+          proxy.writeQuery(
+            Request(
+              operation: Operation(
+                document: gql(r'''
+                  mutation UpdateBio($id: ID!) {
+                    updateProfile(id: $id) {
+                      __typename
+                      id
+                      bio
+                    }
+                  }
+                '''),
+              ),
+              variables: {'id': 'p1'},
+            ),
+            data: {
+              '__typename': 'Mutation',
+              // `bio` is selected by the mutation but omitted from the payload.
+              'updateProfile': {
+                '__typename': 'Profile',
+                'id': 'p1',
+              },
+            },
+          );
+          return proxy;
+        },
+        '1',
+      );
+
+      expect(
+        cache.readNormalized('Profile:p1'),
+        equals({'__typename': 'Profile', 'id': 'p1', 'bio': 'hi'}),
+      );
+    });
+
+    test('the base store is unchanged by the optimistic read', () {
+      cache.writeNormalized('User:123', {
+        '__typename': 'User',
+        'id': '123',
+        'name': 'kyle',
+        'friendStatus': 'NOT_FRIENDS',
+      });
+
+      cache.recordOptimisticTransaction(
+        (proxy) {
+          proxy.writeQuery(
+            partialFriendStatusRequest(),
+            data: partialFriendStatusData(),
+          );
+          return proxy;
+        },
+        '1',
+      );
+
+      expect(
+          cache.readNormalized('User:123', optimistic: false),
+          equals({
+            '__typename': 'User',
+            'id': '123',
+            'name': 'kyle',
+            'friendStatus': 'NOT_FRIENDS',
+          }));
+    });
+  });
 
   group('Handles MultipartFile variables', () {
     late GraphQLCache cache;

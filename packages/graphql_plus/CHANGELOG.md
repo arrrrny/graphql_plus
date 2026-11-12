@@ -1,3 +1,21 @@
+# Unreleased
+
+## Fixed
+- **A partial `optimisticResult` no longer blanks cache fields it omits** (closes #3,
+  upstream graphql-flutter#1118). `normalize` emits an explicit `null` for every selected
+  field that an optimistic payload left out; those nulls were recorded into the optimistic
+  patch and then overwrote the stored value when the patch was merged, so an optimistic write
+  of `{id, friendStatus}` erased a cached `name`. Nulls originating from a partial payload are
+  now dropped before the patch is recorded, making an absent field a no-op rather than a clear.
+  - Behaviour change: a field deliberately set to `null` in an optimistic payload is also
+    treated as an omission and no longer blanks optimistically; it blanks when the network
+    response lands. This matches Apollo's observable optimistic-merge semantics.
+- **Optimistic writes are now actually merged.** `OptimisticProxy.writeNormalized` guarded its
+  merge path with `value is Map<String, Object>`, which is never true for the
+  `Map<String, dynamic>` that `normalize` passes. Every optimistic write had therefore been
+  stored raw and unmerged, and the documented "deeply merging maps with existing values"
+  behaviour never ran. The guard is removed.
+
 # v5.2.6
 
 ## Added
