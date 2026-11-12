@@ -376,7 +376,7 @@ void main() {
         final currentRequest = requestCount;
         // First request is slow, others are fast
         if (currentRequest == 1) {
-          await Future<void>.delayed(Duration(seconds: 2));
+          await Future<void>.delayed(Duration(seconds: 3));
         }
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
@@ -410,8 +410,8 @@ void main() {
           ),
         );
 
-        // Cancel first request
-        await Future<void>.delayed(Duration(milliseconds: 50));
+        // Cancel first request after ensuring it's in flight
+        await Future<void>.delayed(Duration(milliseconds: 100));
         token1.cancel();
 
         // Second request should complete successfully
