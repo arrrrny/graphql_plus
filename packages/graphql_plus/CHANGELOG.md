@@ -1,3 +1,21 @@
+# Unreleased
+
+## Fixed
+- **Subscriptions no longer enter an infinite connect/disconnect loop** (closes #15, upstream
+  graphql-flutter#811). For the legacy `graphql-ws` subprotocol, liveness was inferred from
+  server-initiated `ConnectionKeepAlive` messages, and the watchdog force-closed the socket when
+  none arrived within `inactivityTimeout` (default 30s). Servers that do not use protocol
+  keepalives — Apollo Server 3+, NestJS — therefore had every healthy but idle subscription
+  closed and auto-reconnected forever. The watchdog is now armed only after the peer has
+  demonstrated it sends keepalives, so a peer that never sends them is left alone while
+  dead-connection detection is preserved for any peer that sends at least one: the watchdog is
+  (re)armed on every keepalive, however late the first one arrives.
+  - The issue title blames a `content-length: 0` handshake header. That does not reproduce on
+    Dart 3.14: the handshake `dart:io` sends was captured and contains no `content-length`
+    header at all. The keepalive watchdog is the actual cause.
+  - `inactivityTimeout: Duration.zero` still disables the timeout; combined with
+    `autoReconnect: true` it is what turns a quiet connection into a visible loop.
+
 # v5.2.6
 
 ## Added
