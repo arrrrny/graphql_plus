@@ -23,7 +23,7 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          flags: graphql
+          flags: graphql_plus
       - name: Run coverage (flutter)
         run: make ci_coverage_flutter
       - name: Upload coverage (flutter)
