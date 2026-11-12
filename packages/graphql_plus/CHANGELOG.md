@@ -1,4 +1,4 @@
-# v5.2.6 (unreleased)
+# v5.2.6
 
 ## Added
 - **New `SocketClientConfig.getHeaders` callback** (sync or async,
@@ -15,6 +15,14 @@
   refreshed values are supplied via the new `getHeaders` callback rather than
   by widening `headers` to accept callbacks, so invalid configurations keep
   failing at compile time instead of as runtime cast errors mid-reconnect.
+
+## Documentation
+- Removed the upstream project's community furniture from the fork's READMEs
+  (Discord invite, hiring banner, unrelated third-party CI badges, dead
+  OpenCollective image gallery) and repointed every relative link from the
+  pre-rename `packages/graphql` path to `packages/graphql_plus`.
+- Dropped the `open_collective: graphql-flutter` entry from `FUNDING.yml` in
+  favour of this fork's own GitHub Sponsors entry.
 
 # v5.2.5
 

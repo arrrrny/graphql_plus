@@ -7,39 +7,27 @@
 > Issues: https://github.com/arrrrny/graphql_plus/issues
 
 <div align="center">
-  <h1>GraphQL Flutter</h1>
-
-  <div align="center">
-      <img src="https://miro.medium.com/max/1400/1*bU9k3XzmNAQ9F9J0uCiFsQ.png" width="800"/>
-  </div>
+  <h1>GraphQL Flutter Plus</h1>
 
   <p>
     <strong>Flutter Widgets wrapper around graphql API</strong>
   </p>
 
   <h4>
-    <a href="https://github.com/zino-hofmann/graphql-flutter">Project Homepage</a>
+    <a href="https://github.com/arrrrny/graphql_plus/tree/master/packages/graphql_flutter_plus">Project Homepage</a>
   </h4>
 
-  <a href="https://github.com/laanwj/rust-clightning-rpc/actions">
-    <img alt="GitHub Workflow Status (branch)" src="https://img.shields.io/github/workflow/status/laanwj/rust-clightning-rpc/Integration%20testing/master?style=flat-square"/>
-  </a>
-
-  <a href="https://pub.dev/packages/graphql">
-    <img alt="Pub Popularity" src="https://img.shields.io/pub/popularity/graphql?style=flat-square"/>
-  </a>
-
-  <a href="https://discord.gg/YBFCTXNbwY">
-    <img alt="Discord" src="https://img.shields.io/discord/559455668810153989?style=flat-square"/>
+  <a href="https://pub.dev/packages/graphql_flutter_plus">
+    <img alt="graphql_flutter_plus on pub.dev" src="https://img.shields.io/pub/v/graphql_flutter_plus?style=flat-square"/>
   </a>
 
 </div>
 
 ## Introduction
 
-`graphql_flutter` provides an idiomatic flutter API and widgets for [`graphql/client.dart`](https://pub.dev/packages/graphql). They are co-developed [on github](https://github.com/zino-app/graphql-flutter), where you can find more in-depth examples. We also have a lively community on [discord][discord-link].
+`graphql_flutter_plus` provides an idiomatic flutter API and widgets for [`graphql_plus`](https://pub.dev/packages/graphql_plus). They are co-developed [on github](https://github.com/arrrrny/graphql_plus), where you can find more in-depth examples.
 
-This guide is mostly focused on setup, widgets, and flutter-specific considerations. For more in-depth details on the `graphql` API, see the [`graphql` README](../graphql/README.md)
+This guide is mostly focused on setup, widgets, and flutter-specific considerations. For more in-depth details on the `graphql_plus` API, see the [`graphql_plus` README](../graphql_plus/README.md)
 
 - [GraphQL Flutter](#graphql-flutter)
   - [Installation](#installation)
@@ -55,17 +43,17 @@ This guide is mostly focused on setup, widgets, and flutter-specific considerati
     - [Other hooks](#other-hooks)
   - [Code generation](#code-generation)
 
-**Useful sections in the [`graphql` README](../graphql/README.md):**
+**Useful sections in the [`graphql_plus` README](../graphql_plus/README.md):**
 
-- [in-depth link guide](../graphql/README.md#links)
-- [Direct Cache Access](../graphql/README.md#direct-cache-access-api)
-- [Cache Write Strictness](../graphql/README.md#write-strictness-and-partialdatapolicy)
-- [Policies](../graphql/README.md#exceptions)
-- [Exceptions](../graphql/README.md#exceptions)
-- [Operation Cancellation](../graphql/README.md#cancellation)
-- [AWS AppSync Support](../graphql/README.md#aws-appsync-support)
-- [GraphQL Upload](../graphql/README.md#graphql-upload)
-- [Parsing ASTs at build-time](../graphql/README.md#parsing-asts-at-build-time)
+- [in-depth link guide](../graphql_plus/README.md#links)
+- [Direct Cache Access](../graphql_plus/README.md#direct-cache-access-api)
+- [Cache Write Strictness](../graphql_plus/README.md#write-strictness-and-partialdatapolicy)
+- [Policies](../graphql_plus/README.md#exceptions)
+- [Exceptions](../graphql_plus/README.md#exceptions)
+- [Operation Cancellation](../graphql_plus/README.md#cancellation)
+- [AWS AppSync Support](../graphql_plus/README.md#aws-appsync-support)
+- [GraphQL Upload](../graphql_plus/README.md#graphql-upload)
+- [Parsing ASTs at build-time](../graphql_plus/README.md#parsing-asts-at-build-time)
 
 
 **Useful API Docs:**
@@ -432,7 +420,7 @@ return FloatingActionButton(
 ```
 
 
-`graphql` also provides [file upload](../graphql/README.md#graphql-upload) support as well.
+`graphql` also provides [file upload](../graphql_plus/README.md#graphql-upload) support as well.
 
 #### Optimism
 
@@ -640,7 +628,7 @@ final mutationObservableQuery = useWatchMutation(WatchQueryOptions(...)); // Wat
 ### GraphQL Consumer
 
 If you want to use the `client` directly, say for some its
-[direct cache update](../graphql/README.md#direct-cache-access-api) methods,
+[direct cache update](../graphql_plus/README.md#direct-cache-access-api) methods,
 You can use `GraphQLConsumer` to grab it from any `context` descended from a `GraphQLProvider`:
 
 ```dart
@@ -703,21 +691,13 @@ return Column(
 );
 ```
 
-
-
-[build-status-badge]: https://img.shields.io/github/workflow/status/zino-hofmann/graphql-flutter/graphql-flutter%20Tests%20case?style=flat-square
-[build-status-link]: https://github.com/zino-hofmann/graphql-flutter/actions
-[coverage-badge]: https://img.shields.io/codecov/c/github/zino-hofmann/graphql-flutter/beta?style=flat-square
-[coverage-link]: https://app.codecov.io/gh/zino-hofmann/graphql-flutter
-[version-badge]: https://img.shields.io/pub/v/graphql_flutter.svg?style=flat-square
-[package-link]: https://pub.dartlang.org/packages/graphql_flutter
-[license-badge]: https://img.shields.io/github/license/zino-app/graphql-flutter.svg?style=flat-square
-[license-link]: https://github.com/zino-app/graphql-flutter/blob/master/LICENSE
+[build-status-badge]: https://img.shields.io/github/actions/workflow/status/arrrrny/graphql_plus/build.yml?branch=master&style=flat-square
+[build-status-link]: https://github.com/arrrrny/graphql_plus/actions
+[coverage-badge]: https://img.shields.io/codecov/c/github/arrrrny/graphql_plus?style=flat-square
+[coverage-link]: https://app.codecov.io/gh/arrrrny/graphql_plus
+[version-badge]: https://img.shields.io/pub/v/graphql_flutter_plus.svg?style=flat-square
+[package-link]: https://pub.dev/packages/graphql_flutter_plus
+[license-badge]: https://img.shields.io/github/license/arrrrny/graphql_plus.svg?style=flat-square
+[license-link]: https://github.com/arrrrny/graphql_plus/blob/master/LICENSE
 [prs-badge]: https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square
-[prs-link]: https://makeapullrequest.com
-[github-watch-badge]: https://img.shields.io/github/watchers/zino-app/graphql-flutter.svg?style=flat-square&logo=github&logoColor=ffffff
-[github-watch-link]: https://github.com/zino-app/graphql-flutter/watchers
-[github-star-badge]: https://img.shields.io/github/stars/zino-app/graphql-flutter.svg?style=flat-square&logo=github&logoColor=ffffff
-[github-star-link]: https://github.com/zino-app/graphql-flutter/stargazers
-[discord-badge]: https://img.shields.io/discord/559455668810153989.svg?style=flat-square&logo=discord&logoColor=ffffff
-[discord-link]: https://discord.gg/tXTtBfC
+[prs-link]: http://makeapullrequest.com

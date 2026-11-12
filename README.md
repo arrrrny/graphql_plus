@@ -12,30 +12,22 @@
 ---
 
 <div align="center">
-  <h1>GraphQL Flutter</h1>
-
-  <div align="center">
-      <img src="https://miro.medium.com/max/1400/1*bU9k3XzmNAQ9F9J0uCiFsQ.png" width="800"/>
-  </div>
+  <h1>GraphQL Plus</h1>
 
   <p>
     <strong>A collection of packages to work with graphql server in dart and flutter.</strong>
   </p>
 
   <h4>
-    <a href="https://github.com/zino-hofmann/graphql-flutter">Project Homepage</a>
+    <a href="https://github.com/arrrrny/graphql_plus">Project Homepage</a>
   </h4>
 
-  <a href="https://github.com/laanwj/rust-clightning-rpc/actions">
-    <img alt="GitHub Workflow Status (branch)" src="https://img.shields.io/github/workflow/status/laanwj/rust-clightning-rpc/Integration%20testing/master?style=flat-square"/>
+  <a href="https://pub.dev/packages/graphql_plus">
+    <img alt="graphql_plus on pub.dev" src="https://img.shields.io/pub/v/graphql_plus?style=flat-square"/>
   </a>
 
-  <a href="https://pub.dev/packages/graphql">
-    <img alt="Pub Popularity" src="https://img.shields.io/pub/popularity/graphql?style=flat-square"/>
-  </a>
-
-  <a href="https://discord.gg/YBFCTXNbwY">
-    <img alt="Discord" src="https://img.shields.io/discord/559455668810153989?style=flat-square"/>
+  <a href="https://pub.dev/packages/graphql_flutter_plus">
+    <img alt="graphql_flutter_plus on pub.dev" src="https://img.shields.io/pub/v/graphql_flutter_plus?style=flat-square"/>
   </a>
 
 </div>
@@ -48,19 +40,13 @@ This project combines the benefits of GraphQL with the benefits of `Streams` in 
 
 The project took inspiration from the [Apollo GraphQL client](https://github.com/apollographql/apollo-client), great work guys!
 
-## We're Hiring! 🚀
-
-We're looking for a Flutter engineer to lead mobile development at [Expatfile.tax](https://expatfile.tax?utm_source=github&utm_medium=readme&utm_campaign=mobile_developer_role) 🇺🇸✈️🌍  
-→ [Check out the full job description here](https://hire.toggl.com/c/kj88m/overview)
-
-
 ## Packages
 
 This is a Monorepo which contains the following packages:
 
-| Crate     | Description |  Version |
+| Package     | Description |  Version |
 |:----------|:-----------:|--:|
-| [graphql](./packages/graphql_plus) | Client implementation to interact with any graphql server  | ![Pub Version (including pre-releases)](https://img.shields.io/pub/v/graphql?include_prereleases&style=flat-square)  |
+| [graphql_plus](./packages/graphql_plus) | Client implementation to interact with any graphql server  | ![Pub Version (including pre-releases)](https://img.shields.io/pub/v/graphql_plus?include_prereleases&style=flat-square)  |
 | [graphql_flutter_plus](./packages/graphql_flutter_plus) | Flutter Widgets wrapper around graphql API | ![Pub Version (including pre-releases)](https://img.shields.io/pub/v/graphql_flutter_plus?include_prereleases&style=flat-square) |
 
 ## Utils Tools
@@ -74,14 +60,14 @@ Around `graphql_flutter` are builds awesome tools like:
 ## Features
 
 ✅ &nbsp; Queries, Mutations, and Subscriptions  
-✅ &nbsp; [Query polling and rebroadcasting](./packages/graphql/README.md#clientwatchquery-and-observablequery)  
-✅ &nbsp; [In memory and persistent caching](./packages/graphql/README.md#persistence)  
-✅ &nbsp; [GraphQL Upload](./packages/graphql/README.md#graphql-upload)  
+✅ &nbsp; [Query polling and rebroadcasting](./packages/graphql_plus/README.md#clientwatchquery-and-observablequery)  
+✅ &nbsp; [In memory and persistent caching](./packages/graphql_plus/README.md#persistence)  
+✅ &nbsp; [GraphQL Upload](./packages/graphql_plus/README.md#graphql-upload)  
 ✅ &nbsp; [Optimistic results](./packages/graphql_flutter_plus/README.md#optimism)  
-✅ &nbsp; [Modularity](./packages/graphql/README.md#links)  
-✅ &nbsp; [Client-state management](./packages/graphql/README.md#direct-cache-access-api)  
-✅ &nbsp; [Operation cancellation](./packages/graphql/README.md#cancellation)  
-⚠️  &nbsp; [Automatic Persisted Queries](./packages/graphql/README.md#persistedquerieslink-experimental-warning-out-of-service-warning) (out of service)  
+✅ &nbsp; [Modularity](./packages/graphql_plus/README.md#links)  
+✅ &nbsp; [Client-state management](./packages/graphql_plus/README.md#direct-cache-access-api)  
+✅ &nbsp; [Operation cancellation](./packages/graphql_plus/README.md#cancellation)  
+⚠️  &nbsp; [Automatic Persisted Queries](./packages/graphql_plus/README.md#persistedquerieslink-experimental-warning-out-of-service-warning) (out of service)  
 
 ## Contributing
 
@@ -93,46 +79,17 @@ This package was originally created and published by the engineers at [Zino App 
 
 This project follows the [all-contributors](https://github.com/kentcdodds/all-contributors) specification. Contributions of any kind are welcome!
 
-[build-status-badge]: https://img.shields.io/github/workflow/status/zino-hofmann/graphql-flutter/graphql-flutter%20Tests%20case?style=flat-square
-[build-status-link]: https://github.com/zino-hofmann/graphql-flutter/actions
-[coverage-badge]: https://img.shields.io/codecov/c/github/zino-hofmann/graphql-flutter/beta?style=flat-square
-[coverage-link]: https://app.codecov.io/gh/zino-hofmann/graphql-flutter
-[version-badge]: https://img.shields.io/pub/v/graphql_flutter.svg?style=flat-square
-[package-link]: https://pub.dartlang.org/packages/graphql_flutter
-[package-link-client]: https://pub.dartlang.org/packages/graphql
-[license-badge]: https://img.shields.io/github/license/zino-app/graphql-flutter.svg?style=flat-square
-[license-link]: https://github.com/zino-app/graphql-flutter/blob/master/LICENSE
+[build-status-badge]: https://img.shields.io/github/actions/workflow/status/arrrrny/graphql_plus/build.yml?branch=master&style=flat-square
+[build-status-link]: https://github.com/arrrrny/graphql_plus/actions
+[coverage-badge]: https://img.shields.io/codecov/c/github/arrrrny/graphql_plus?style=flat-square
+[coverage-link]: https://app.codecov.io/gh/arrrrny/graphql_plus
+[version-badge]: https://img.shields.io/pub/v/graphql_flutter_plus.svg?style=flat-square
+[package-link]: https://pub.dev/packages/graphql_flutter_plus
+[package-link-client]: https://pub.dev/packages/graphql_plus
+[license-badge]: https://img.shields.io/github/license/arrrrny/graphql_plus.svg?style=flat-square
+[license-link]: https://github.com/arrrrny/graphql_plus/blob/master/LICENSE
 [prs-badge]: https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square
 [prs-link]: http://makeapullrequest.com
-[github-watch-badge]: https://img.shields.io/github/watchers/zino-app/graphql-flutter.svg?style=flat-square&logo=github&logoColor=ffffff
-[github-watch-link]: https://github.com/zino-app/graphql-flutter/watchers
-[github-star-badge]: https://img.shields.io/github/stars/zino-app/graphql-flutter.svg?style=flat-square&logo=github&logoColor=ffffff
-[github-star-link]: https://github.com/zino-app/graphql-flutter/stargazers
-[discord-badge]: https://img.shields.io/discord/559455668810153989.svg?style=flat-square&logo=discord&logoColor=ffffff
-[discord-link]: https://discord.gg/tXTtBfC
-
-### Financial Contributors
-
-Become a financial contributor and help us sustain our community. [[Contribute](https://opencollective.com/graphql-flutter/contribute)]
-
-#### Individuals
-
-<a href="https://opencollective.com/graphql-flutter"><img src="https://opencollective.com/graphql-flutter/individuals.svg?width=890"></a>
-
-#### Organizations
-
-Support this project with your organization. Your logo will show up here with a link to your website. [[Contribute](https://opencollective.com/graphql-flutter/contribute)]
-
-<a href="https://opencollective.com/graphql-flutter/organization/0/website"><img src="https://opencollective.com/graphql-flutter/organization/0/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/1/website"><img src="https://opencollective.com/graphql-flutter/organization/1/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/2/website"><img src="https://opencollective.com/graphql-flutter/organization/2/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/3/website"><img src="https://opencollective.com/graphql-flutter/organization/3/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/4/website"><img src="https://opencollective.com/graphql-flutter/organization/4/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/5/website"><img src="https://opencollective.com/graphql-flutter/organization/5/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/6/website"><img src="https://opencollective.com/graphql-flutter/organization/6/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/7/website"><img src="https://opencollective.com/graphql-flutter/organization/7/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/8/website"><img src="https://opencollective.com/graphql-flutter/organization/8/avatar.svg"></a>
-<a href="https://opencollective.com/graphql-flutter/organization/9/website"><img src="https://opencollective.com/graphql-flutter/organization/9/avatar.svg"></a>
 
 ## Articles and Videos
 

@@ -55,5 +55,5 @@ Please fill or delete these sections if you don't fill them in
 Did you struggle to understand the docs or examples, or dislike the current api? 
 
 
-If you want to troubleshoot or discuss in real time, consider coming to the `support` channel in the [discord](https://discord.gg/tXTtBfC)
+If you want to troubleshoot or discuss in real time, comment on your issue and we will follow up.
 -->

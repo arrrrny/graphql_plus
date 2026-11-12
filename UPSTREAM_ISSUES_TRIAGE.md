@@ -40,6 +40,36 @@ are mirrored here with links so the original reporters are notified and can foll
 
 ---
 
+## Triage decisions — 5.x vs 6.x (2026-11-12)
+
+Rule applied: an issue is **5.x** only if it can land without breaking the published API of
+`graphql_plus` 5.x / `graphql_flutter_plus` 5.x (constitution principle III). Everything that
+needs a signature change, a new dependency, a new package, or a cache-semantics overhaul is
+**6.x** and is designed in `specs/002-*`.
+
+### 5.x — fix in place (4)
+
+| Issue | Why 5.x | Status |
+| --- | --- | --- |
+| [#15](https://github.com/arrrrny/graphql_plus/issues/15) subscriptions content-length 0 connect/disconnect loop | Handshake header fix inside `websocket_client.dart`; no public API change | **5.x, planned** |
+| [#3](https://github.com/arrrrny/graphql_plus/issues/3) partial `optimisticResult` nulls existing cache fields | `OptimisticProxy.writeNormalized` currently deep-merges the partial over the patch; omitting a field must not write `null`. Fixable inside the proxy | **5.x, planned** |
+| [#6](https://github.com/arrrrny/graphql_plus/issues/6) detect lost subscription connection | Internal `onConnectionLost` already exists; expose it as a new *additive* stream on `SocketClient` | **5.x, planned (additive)** |
+| [#8](https://github.com/arrrrny/graphql_plus/issues/8) re-request operation with updated context | Socket-reconnect half shipped in 5.2.6 (`SocketClientConfig.getHeaders`); the link-replay half is a contained `Link` addition | **5.x, partial** |
+
+### 6.x — breaking / new package / new dependency (7)
+
+| Issue | Why 6.x |
+| --- | --- |
+| [#5](https://github.com/arrrrny/graphql_plus/issues/5) `client.mutate` ignores `optimisticResult` | Requires changing `MutationOptions` to carry the optimistic pass; observable behaviour change for existing callers |
+| [#7](https://github.com/arrrrny/graphql_plus/issues/7) cookie auth | New `credentials` option on `HttpLink` + a `cookie_jar` adapter; a cookie link is additive but the `HttpLink` option is not |
+| [#9](https://github.com/arrrrny/graphql_plus/issues/9) background isolate client | Replaces the cache/normalization implementation behind the same API; needs an architecture rewrite |
+| [#11](https://github.com/arrrrny/graphql_plus/issues/11) offline mutation queue | Serialization + ordering + idempotency; likely its own package, requires the 6.x repository contracts |
+| [#12](https://github.com/arrrrny/graphql_plus/issues/12) cache TTL / eviction / GC | Changes `GraphQLCache` and the normalization core; TTL semantics affect every `FetchPolicy` |
+| [#13](https://github.com/arrrrny/graphql_plus/issues/13) dio transport | New runtime dependency; `5.x` is frozen for dependencies |
+| [#16](https://github.com/arrrrny/graphql_plus/issues/16) AWS AppSync REALTIME subscriptions | Custom protocol serializer + per-message auth; the current `SocketClient` cannot express it |
+
+---
+
 ## ⏱ Timeout/completer cluster — likely already fixed by `graphql_plus` 5.2.5
 
 The `QueryManager` timeout/completer hardening shipped in `graphql_plus` 5.2.5 targets exactly this cluster.

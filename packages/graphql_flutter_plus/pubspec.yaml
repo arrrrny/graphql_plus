@@ -1,12 +1,12 @@
 name: graphql_flutter_plus
 description: Actively maintained fork of graphql_flutter 5.3.0 (zino-hofmann/graphql-flutter) — Flutter widgets for package:graphql_plus, a hardened graphql client fork.
-version: 5.3.1
+version: 5.3.2
 repository: https://github.com/arrrrny/graphql_plus/tree/master/packages/graphql_flutter_plus
 issue_tracker: https://github.com/arrrrny/graphql_plus/issues
 
 
 dependencies:
-  graphql_plus: ^5.2.5
+  graphql_plus: ^5.2.6
   gql_exec: ^1.0.0+1
   flutter:
     sdk: flutter

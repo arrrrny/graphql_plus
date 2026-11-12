@@ -22,7 +22,7 @@ Stack Overflow is a much better place to ask questions since:
 
 To save your and our time, we will systematically close all issues that are requests for general support and redirect people to Stack Overflow.
 
-If you would like to chat about the question in real-time, you can reach out via [our discord channel][discord].
+If you would like to chat about the question in real-time, open an issue in our [GitHub Repository][github] and we will get back to you.
 
 ## <a name="issue"></a> Found a Bug?
 
@@ -159,6 +159,6 @@ we use the git commit messages trigger releases.
 see `doc/dev/MAINTAINERS.md` file
  
 [github]: https://github.com/zino-app/graphql-flutter
-[discord]: https://discord.gg/tXTtBfC
+
 [dart-style-guide]: https://dart.dev/guides/language/effective-dart/style
 [stackoverflow]: https://stackoverflow.com/questions/tagged/flutter+graphql

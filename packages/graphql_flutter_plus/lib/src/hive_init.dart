@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/material.dart' show WidgetsFlutterBinding;
+import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
 
 import 'package:path_provider/path_provider.dart'
     show getApplicationDocumentsDirectory;

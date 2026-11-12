@@ -1,28 +1,16 @@
 <div align="center">
-  <h1>GraphQL <Client></Client></h1>
-
-  <div align="center">
-      <img src="https://miro.medium.com/max/1400/1*bU9k3XzmNAQ9F9J0uCiFsQ.png" width="800"/>
-  </div>
+  <h1>GraphQL Plus Client</h1>
 
   <p>
     <strong>Client implementation to interact with any graphql server</strong>
   </p>
 
   <h4>
-    <a href="https://github.com/zino-hofmann/graphql-flutter">Project Homepage</a>
+    <a href="https://github.com/arrrrny/graphql_plus/tree/master/packages/graphql_plus">Project Homepage</a>
   </h4>
 
-  <a href="https://github.com/laanwj/rust-clightning-rpc/actions">
-    <img alt="GitHub Workflow Status (branch)" src="https://img.shields.io/github/workflow/status/laanwj/rust-clightning-rpc/Integration%20testing/master?style=flat-square"/>
-  </a>
-
-  <a href="https://pub.dev/packages/graphql">
-    <img alt="Pub Popularity" src="https://img.shields.io/pub/popularity/graphql?style=flat-square"/>
-  </a>
-
-  <a href="https://discord.gg/YBFCTXNbwY">
-    <img alt="Discord" src="https://img.shields.io/discord/559455668810153989?style=flat-square"/>
+  <a href="https://pub.dev/packages/graphql_plus">
+    <img alt="graphql_plus on pub.dev" src="https://img.shields.io/pub/v/graphql_plus?style=flat-square"/>
   </a>
 
 </div>
@@ -31,7 +19,7 @@
 
 ## Introduction
 
-[graphql/client.dart](https://pub.dev/packages/graphql) is a GraphQL client for dart modeled on the [apollo client], and is currently the most popular GraphQL client for dart. It is co-developed alongside [`graphql_flutter`](https://pub.dev/packages/graphql_flutter) [on github](https://github.com/zino-app/graphql-flutter), where you can find more in-depth examples. We also have a lively community alongside the rest of the GraphQL Dart community on [discord][discord-link].
+[graphql/client.dart](https://pub.dev/packages/graphql) is a GraphQL client for dart modeled on the [apollo client], and is currently the most popular GraphQL client for dart. It is co-developed alongside [`graphql_flutter`](https://pub.dev/packages/graphql_flutter) [on github](https://github.com/zino-app/graphql-flutter), where you can find more in-depth examples. This fork (`graphql_plus`) is maintained independently in [arrrrny/graphql_plus](https://github.com/arrrrny/graphql_plus).
 
 As of `v4`, it is built on foundational libraries from the [gql-dart project], including [`gql`], [`gql_link`], and [`normalize`]. We also depend on [hive](https://docs.hivedb.dev/#/) for persistence via `HiveStore`.
 
@@ -1161,12 +1149,8 @@ HttpLink httpLink = HttpLink('https://api.url/graphql', defaultHeaders: {
 [license-link]: https://github.com/zino-app/graphql-flutter/blob/master/LICENSE
 [prs-badge]: https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square
 [prs-link]: https://makeapullrequest.com
-[github-watch-badge]: https://img.shields.io/github/watchers/zino-app/graphql-flutter.svg?style=flat-square&logo=github&logoColor=ffffff
 [github-watch-link]: https://github.com/zino-app/graphql-flutter/watchers
-[github-star-badge]: https://img.shields.io/github/stars/zino-app/graphql-flutter.svg?style=flat-square&logo=github&logoColor=ffffff
 [github-star-link]: https://github.com/zino-app/graphql-flutter/stargazers
-[discord-badge]: https://img.shields.io/discord/559455668810153989.svg?style=flat-square&logo=discord&logoColor=ffffff
-[discord-link]: https://discord.gg/tXTtBfC
 [gql-dart project]: https://github.com/gql-dart
 [`gql_link`]: https://github.com/gql-dart/gql/tree/master/links/gql_link
 [link diagram]: https://raw.githubusercontent.com/gql-dart/gql/master/links/gql_link/assets/gql_link.svg

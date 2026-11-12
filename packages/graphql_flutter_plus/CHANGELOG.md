@@ -1,3 +1,19 @@
+# v5.3.2
+
+## Fixed
+- Library sources no longer import the deprecated `package:flutter/material.dart`.
+  `CacheProvider` and `hive_init.dart` only ever needed `WidgetsFlutterBinding`,
+  which lives in `package:flutter/widgets.dart`. On Flutter 3.47.0+ the deprecated
+  import is an `info`-level diagnostic, which `--fatal-infos` turns into an error,
+  so `flutter analyze` failed on a clean checkout.
+
+## Changed
+- Dependency on `graphql_plus` widened to `^5.2.6` (was `^5.2.5`), picking up the
+  `SocketClientConfig.getHeaders` reconnect-auth callback.
+- README cleanup: removed the upstream project's Discord badge, community links and
+  dead third-party badges; all relative links to the client package now point at
+  `../graphql_plus/README.md`.
+
 # v5.3.1 (fork)
 
 `graphql_flutter_plus` is the actively maintained fork of `graphql_flutter` 5.3.0
