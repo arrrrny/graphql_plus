@@ -112,11 +112,48 @@ void main() {
 
     expect(result.data, isNotNull);
 
-    // give the fire-and-forget refetch time to run
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    // wait for the fire-and-forget refetch to reach the link
+    var captured = <Request>[];
+    for (var i = 0; i < 50; i++) {
+      captured = verify(link.request(captureAny)).captured.cast<Request>();
+      if (captured.length >= 2) break;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+
+    expect(captured.length, 2);
+    expect(captured[1].operation.document, parseString(query));
+  });
+
+  test(
+      'awaited refetch failures surface on the mutation future (awaitRefetchQueries: true)',
+      () async {
+    when(link.request(any)).thenAnswer((invocation) {
+      final request = invocation.positionalArguments.first as Request;
+      if (request.operation.document == parseString(mutation)) {
+        return Stream.fromIterable(
+          [Response(data: mutationData, response: <String, dynamic>{})],
+        );
+      }
+      return Stream<Response>.error(
+        OperationException(
+            graphqlErrors: [const GraphQLError(message: 'refetch boom')]),
+      );
+    });
+
+    await expectLater(
+      client.mutate(
+        MutationOptions(
+          document: parseString(mutation),
+          refetchQueries: [QueryOptions(document: parseString(query))],
+          awaitRefetchQueries: true,
+        ),
+      ),
+      throwsA(isA<OperationException>()),
+    );
 
     final captured = verify(link.request(captureAny)).captured.cast<Request>();
     expect(captured.length, 2);
+    expect(captured[0].operation.document, parseString(mutation));
     expect(captured[1].operation.document, parseString(query));
   });
 

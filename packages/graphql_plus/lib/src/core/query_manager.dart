@@ -242,7 +242,11 @@ class QueryManager {
 
     if (options.awaitRefetchQueries == true) {
       /// refetch failures surface on the mutation future
-      await Future.wait(futures);
+      final results = await Future.wait(futures);
+      final failures = results.where((r) => r.hasException).toList();
+      if (failures.isNotEmpty) {
+        throw failures.first.exception!;
+      }
       maybeRebroadcastQueriesAsync();
     } else {
       /// fire-and-forget: refetch failures are ignored
