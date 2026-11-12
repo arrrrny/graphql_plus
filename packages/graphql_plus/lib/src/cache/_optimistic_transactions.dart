@@ -85,7 +85,15 @@ class OptimisticProxy extends NormalizingDataProxy {
     // is merged in `GraphQLCache.readNormalized`, which blanks fields the caller
     // never mentioned. Dropping them makes an absent field a no-op rather than a
     // clear, which is the documented optimistic-merge semantic.
-    final patch = _withoutNulls(value);
+    //
+    // Only strip when there is something to protect. For an entity the store has
+    // never seen, the stripped keys are exactly what keeps it denormalizable: a
+    // selected field missing from the normalized data raises `PartialDataException`
+    // in `denormalize_node`, which `denormalize_operation` turns into `null`. An
+    // optimistic *create* would then read back as nothing at all.
+    final hasSomethingToProtect = data.containsKey(dataId) ||
+        cache.readNormalized(dataId, optimistic: false) != null;
+    final patch = hasSomethingToProtect ? _withoutNulls(value) : value;
     final existing = data[dataId];
     data[dataId] =
         existing != null ? deeplyMergeLeft([existing, patch]) : patch;

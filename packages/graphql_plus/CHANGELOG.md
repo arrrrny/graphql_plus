@@ -10,6 +10,13 @@
   - Behaviour change: a field deliberately set to `null` in an optimistic payload is also
     treated as an omission and no longer blanks optimistically; it blanks when the network
     response lands. This matches Apollo's observable optimistic-merge semantics.
+  - Scope: the stripping applies to a field whose entity the cache already holds, where there
+    is a value to protect. For an entity the cache has never seen the nulls are kept, because
+    they are what keeps a freshly created entity denormalizable — dropping them would make an
+    optimistic create read back as `null`. Nested values inside a `List` are not stripped:
+    lists are replaced wholesale when a patch is merged, so an omitted subfield of a list item
+    is already an omission rather than a clear, and stripping there would leave the item short
+    of the fields the selection set requires.
 - **Optimistic writes are now actually merged.** `OptimisticProxy.writeNormalized` guarded its
   merge path with `value is Map<String, Object>`, which is never true for the
   `Map<String, dynamic>` that `normalize` passes. Every optimistic write had therefore been
