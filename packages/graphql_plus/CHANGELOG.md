@@ -1,3 +1,21 @@
+# v5.2.6 (unreleased)
+
+## Added
+- **New `SocketClientConfig.getHeaders` callback** (sync or async,
+  `FutureOr<Map<String, dynamic>?> Function()?`) for refreshing auth headers
+  on reconnect. It is re-evaluated on every connection and reconnection
+  attempt and its non-null result takes precedence over the literal `headers`
+  map, so an expired `Authorization` header no longer fails every
+  reconnection forever (upstream graphql-flutter#1323). The existing
+  payload-based refresh path (`initialPayload` callback) is unchanged and now
+  documented.
+
+## Changed
+- `SocketClientConfig.headers` keeps its `Map<String, dynamic>?` type —
+  refreshed values are supplied via the new `getHeaders` callback rather than
+  by widening `headers` to accept callbacks, so invalid configurations keep
+  failing at compile time instead of as runtime cast errors mid-reconnect.
+
 # v5.2.5
 
 Forked from `package:graphql` 5.2.4 as `graphql_plus` (arrrrny/graphql_plus) to

@@ -50,6 +50,7 @@ class SocketClientConfig {
       this.delayBetweenReconnectionAttempts = const Duration(seconds: 5),
       this.initialPayload,
       this.headers,
+      this.getHeaders,
       this.connectFn,
       this.onConnectionLost,
       this.toggleConnection,
@@ -103,8 +104,38 @@ class SocketClientConfig {
   /// ```
   final WebSocketConnect? connectFn;
 
-  /// Custom header to add inside the client
+  /// Custom headers sent with the websocket connection request.
+  ///
+  /// Used as-is unless [getHeaders] is provided; see [resolvedHeaders] for
+  /// how the two interact.
   final Map<String, dynamic>? headers;
+
+  /// Optional callback returning the headers for each connection attempt.
+  ///
+  /// It is invoked (and awaited if it returns a future) on **every**
+  /// connection and reconnection attempt, so authentication tokens can be
+  /// refreshed between attempts. A non-null return value takes precedence
+  /// over [headers]; when it returns null, [headers] is used:
+  ///
+  /// ```dart
+  /// SocketClientConfig(
+  ///   getHeaders: () => {'Authorization': 'Bearer ${authStore.currentToken}'},
+  /// )
+  /// ```
+  final FutureOr<Map<String, dynamic>?> Function()? getHeaders;
+
+  /// The headers to use for the current connection attempt.
+  ///
+  /// If [getHeaders] is set, it is re-invoked on each attempt, yielding
+  /// fresh values on reconnect; its non-null result takes precedence over
+  /// [headers].
+  Future<Map<String, dynamic>?> get resolvedHeaders async {
+    final resolved = await getHeaders?.call();
+    if (resolved != null) {
+      return resolved;
+    }
+    return headers;
+  }
 
   final Future<Duration?>? Function(int? code, String? reason)?
       onConnectionLost;
@@ -113,23 +144,33 @@ class SocketClientConfig {
 
   /// Function to define another connection without call directly
   /// the connection function
-  FutureOr<WebSocketChannel> connect(
+  ///
+  /// If [getHeaders] is set, it is re-evaluated here on every
+  /// connection and reconnection attempt.
+  ///
+  /// Headers are not applied when [connectFn] is set: a custom connect
+  /// function is responsible for supplying its own headers.
+  Future<WebSocketChannel> connect(
       {required Uri uri,
       Iterable<String>? protocols,
-      Map<String, dynamic>? headers}) {
+      Map<String, dynamic>? headers}) async {
     if (connectFn != null) {
       return connectFn!(uri, protocols);
     }
     return defaultConnectPlatform(
       uri,
       protocols,
-      headers: headers ?? this.headers,
+      headers: headers ?? await resolvedHeaders,
     );
   }
 
   /// Payload to be sent with the connection_init request.
   ///
   /// Can be a literal value, a callback, or an async callback. End value must be valid argument for `json.encode`.
+  ///
+  /// If [initialPayload] is a function, it is re-invoked on every
+  /// connection and reconnection attempt, so authentication tokens
+  /// inside the payload can be refreshed between attempts.
   ///
   /// Internal usage is roughly:
   /// ```dart
@@ -305,8 +346,9 @@ class SocketClient {
     _connectionStateController.add(SocketConnectionState.connecting);
 
     try {
-      // Even though config.connect is sync, we call async in order to make the
-      // SocketConnectionState.connected attribution not overload SocketConnectionState.connecting
+      // config.connect is async; awaiting it keeps the
+      // SocketConnectionState.connected attribution from overloading
+      // SocketConnectionState.connecting
       var connection =
           await config.connect(uri: Uri.parse(url), protocols: [protocol]);
       socketChannel = connection.forGraphQL();

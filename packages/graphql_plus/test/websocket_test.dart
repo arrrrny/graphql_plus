@@ -38,6 +38,23 @@ SocketClient getTestClient({
       ),
     );
 
+/// Polls [condition] every 5 ms until it returns true or [timeout] elapses,
+/// failing with a descriptive message instead of spinning until the test
+/// framework's timeout.
+Future<void> waitForCondition(
+  bool Function() condition, {
+  required String message,
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('$message within $timeout');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 Future<void> main() async {
   String wsUrl = await runWebSocketServer();
   group('InitOperation', () {
@@ -990,6 +1007,113 @@ Future<void> main() async {
             return jsonDecode(s as String)['payload']['token'];
           }),
           emits('mytoken2'));
+    });
+  });
+
+  group('SocketClient with dynamic headers', () {
+    late SocketClient socketClient;
+    final List<String> serverSeenAuthorization = [];
+    late String wsRecorderUrl;
+    var _token = 'Bearer token-1';
+
+    setUpAll(() async {
+      wsRecorderUrl = await runWebSocketServer(
+        port: 5601,
+        onConnectionHeaders: (headers) {
+          final authorization = headers[HttpHeaders.authorizationHeader]?.first;
+          serverSeenAuthorization.add(authorization ?? '');
+        },
+      );
+    });
+
+    setUp(overridePrint((log) {
+      socketClient = SocketClient(
+        wsRecorderUrl,
+        protocol: GraphQLProtocol.graphqlWs,
+        config: SocketClientConfig(
+          delayBetweenReconnectionAttempts: const Duration(milliseconds: 1),
+          getHeaders: () => {'Authorization': _token},
+          onConnectionLost: (code, reason) async {
+            if (code == 4001) {
+              _token = 'Bearer token-2';
+            }
+
+            return Duration.zero;
+          },
+        ),
+      );
+    }));
+
+    tearDown(overridePrint(
+      (log) => socketClient.dispose(),
+    ));
+
+    test('refreshes authorization header on reconnect', () async {
+      await expectLater(
+        socketClient.connectionState,
+        emitsInOrder([
+          SocketConnectionState.connecting,
+          SocketConnectionState.connected,
+        ]),
+      );
+
+      await waitForCondition(
+        () => serverSeenAuthorization.isNotEmpty,
+        message: 'server did not observe the first connection attempt',
+      );
+      expect(serverSeenAuthorization.last, 'Bearer token-1');
+
+      Timer(const Duration(milliseconds: 20), () async {
+        socketClient.socketChannel!.sink.add(forceAuthDisconnectCommand);
+      });
+      await expectLater(
+        socketClient.connectionState,
+        emitsInOrder([
+          SocketConnectionState.connected,
+          SocketConnectionState.notConnected,
+          SocketConnectionState.connecting,
+          SocketConnectionState.connected,
+        ]),
+      );
+
+      await waitForCondition(
+        () => serverSeenAuthorization.length >= 2,
+        message: 'server did not observe the reconnect attempt',
+      );
+      expect(serverSeenAuthorization.last, 'Bearer token-2');
+      expect(serverSeenAuthorization.first, 'Bearer token-1');
+    });
+
+    test('resolvedHeaders accepts literal maps, sync and async callbacks',
+        () async {
+      final literal = SocketClientConfig(headers: {'a': 'b'});
+      expect(await literal.resolvedHeaders, {'a': 'b'});
+
+      final sync = SocketClientConfig(
+          getHeaders: () => {'Authorization': 'Bearer sync'});
+      expect(await sync.resolvedHeaders, {'Authorization': 'Bearer sync'});
+
+      final asyncCfg = SocketClientConfig(
+          getHeaders: () async => {'Authorization': 'Bearer async'});
+      expect(await asyncCfg.resolvedHeaders, {'Authorization': 'Bearer async'});
+
+      final nullHeaders = SocketClientConfig();
+      expect(await nullHeaders.resolvedHeaders, isNull);
+    });
+
+    test('getHeaders result takes precedence over literal headers', () async {
+      final precedence = SocketClientConfig(
+        headers: {'a': 'b'},
+        getHeaders: () => {'Authorization': 'Bearer fresh'},
+      );
+      expect(
+          await precedence.resolvedHeaders, {'Authorization': 'Bearer fresh'});
+
+      final fallback = SocketClientConfig(
+        headers: {'a': 'b'},
+        getHeaders: () => null,
+      );
+      expect(await fallback.resolvedHeaders, {'a': 'b'});
     });
   });
 }
