@@ -93,7 +93,7 @@ The version in our package.json gets copied to the one we publish, and users nee
 ### Scopes
 
 - **graphql**: Changes related to the graphql client
-- **graphql_flutter**: Changes related to the graphql_flutter package
+- **graphql_flutter_plus**: Changes related to the graphql_flutter_plus package
 
 
 ### Subject
@@ -143,7 +143,7 @@ To prepare the release the following steps are required:
   - `export GITHUB_TOKEN="your_token"`
   - `make {changelog_client|changelog_flutter|changelog}`, where
       - `changelog_client`: generate the changelog for graphql;
-      - `changelog_flutter`: generate the changelog for graphql_flutter;
+      - `changelog_flutter`: generate the changelog for graphql_flutter_plus;
       - `changelog`: generate both changelos.
 - Make the Github release: To release a single package we need to create a release with the following tag `{package_name}-v{version_number}`, and
 if we make a release with the tag `v{version_number}` this will release all the packages (useful for a major release of the package).

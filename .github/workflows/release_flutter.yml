@@ -4,12 +4,12 @@ on:
   release:
     types: [created]
     tags:
-      - graphql_flutter-v*
+      - graphql_flutter_plus-v*
   workflow_run:
     workflows:
       - "Build"
       - "Test"
-    branches: [ main ]
+    branches: [ master ]
     types:
       - completed
 
@@ -20,7 +20,7 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@v4 # required!
 
-      - name: 'publish graphql-flutter to to Pub.dev'
+      - name: 'publish graphql_flutter_plus to Pub.dev'
         uses: k-paxian/dart-package-publisher@master
         with:
           credentialJson: ${{ secrets.CREDENTIAL_JSON }}
@@ -28,4 +28,4 @@ jobs:
           skipTests: true
           force: true
           dryRunOnly: ${{ github.event_name != 'release' }}
-          relativePath: './packages/graphql_flutter/'
+          relativePath: './packages/graphql_flutter_plus/'
