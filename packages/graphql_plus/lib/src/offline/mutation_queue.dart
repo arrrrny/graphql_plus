@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:gql/ast.dart' show DocumentNode;
@@ -84,7 +85,9 @@ class QueuedMutation {
   /// The variables the mutation was called with.
   final Map<String, dynamic> variables;
 
-  /// Identifies this payload for deduplication and replay.
+  /// Identifies this payload on the wire, so a replay of a queued write can be
+  /// told apart from a brand new one. Deduplication compares payloads, not
+  /// keys; see [OfflineMutationQueue.enqueue].
   final String idempotencyKey;
 
   /// When the mutation was queued.
@@ -103,6 +106,12 @@ class QueuedMutation {
   late final DocumentNode documentNode = parseString(document);
 
   /// The entry as a request, carrying its [OfflineIdempotencyKey].
+  ///
+  /// The context of the original request is not preserved: a [Context] is not
+  /// serializable, so only the [OfflineIdempotencyKey] is rebuilt here. Callers
+  /// who attach entries to `MutationOptions.context` (auth tokens handled by
+  /// links, tracing data, …) must arrange for those entries to exist again at
+  /// replay time — they will not come back from the queue on their own.
   Request get asRequest => Request(
         operation: Operation(
           document: documentNode,
@@ -151,8 +160,15 @@ class QueuedMutation {
 /// Implement this on top of whatever durable storage the host has (Hive, a
 /// database, a file) and hand it to [OfflineMutationQueue]. A store is read
 /// once, when the queue is built, and written on every change.
+///
+/// [read] is synchronous by design, so a durable store cannot load lazily
+/// inside it: open the Hive box, the database or the file, and finish loading
+/// its contents, *before* constructing the [OfflineMutationQueue].
 abstract class MutationQueueStore {
   /// Every entry currently held by the store, oldest first.
+  ///
+  /// Must return synchronously; a host backed by async storage loads
+  /// everything it needs before the queue that consumes this method exists.
   List<Map<String, dynamic>> read();
 
   /// Replace the contents of the store with [entries].
@@ -227,6 +243,7 @@ class OfflineMutationQueue {
   final MutationQueueStore _store;
   final List<QueuedMutation> _entries;
   final Set<String> _ids = <String>{};
+  Future<int>? _inFlightFlush;
   int _nextId = 1;
 
   /// The most entries the queue will hold.
@@ -254,7 +271,12 @@ class OfflineMutationQueue {
   /// Append [request] to the queue and return the id of the stored entry.
   ///
   /// When [deduplicate] is on and an entry with the same payload is already
-  /// pending, that entry is kept and its id is returned.
+  /// pending, that entry is kept and its id is returned. Entries are compared
+  /// by their canonical payload (printed document, operation name and
+  /// canonicalized variables) and not by the hashed [QueuedMutation
+  /// .idempotencyKey]: the hash is only as wide as the platform keeps its
+  /// integers — dart2js truncates it to 32 bits — so a collision there would
+  /// silently fold a distinct write into an existing entry.
   ///
   /// Throws a [MutationQueueFullException] when the queue is at [maxEntries]
   /// and the payload is not already queued.
@@ -263,14 +285,17 @@ class OfflineMutationQueue {
     String? idempotencyKey,
     DateTime? now,
   }) async {
+    final String document = printNode(request.operation.document);
+    final String? operationName = request.operation.operationName;
     final String key = idempotencyKey ??
         offlineIdempotencyKeyFor(
-          document: printNode(request.operation.document),
-          operationName: request.operation.operationName,
+          document: document,
+          operationName: operationName,
           variables: request.variables,
         );
 
-    final QueuedMutation? queued = _byKey(key);
+    final QueuedMutation? queued =
+        _byPayload(document, operationName, request.variables);
     if (queued != null) {
       return deduplicate ? queued.id : _append(request, key, now);
     }
@@ -332,8 +357,31 @@ class OfflineMutationQueue {
   /// before the next one is sent; a throw stops the flush and leaves that entry
   /// at the head with [QueuedMutation.attempts] incremented.
   ///
+  /// The entry being sent may be removed (by [remove] or [clear], or by a
+  /// listener on the caller's own bookkeeping) while the send is in flight;
+  /// such an entry is simply gone, and the flush continues with whatever the
+  /// queue holds after the await instead of dropping or crashing on it.
+  ///
+  /// A flush that is already running is joined rather than started twice, so
+  /// two concurrent callers cannot interleave two drain loops on one list.
   /// Returns how many mutations were delivered.
-  Future<int> flush(Future<void> Function(QueuedMutation mutation) send) async {
+  Future<int> flush(Future<void> Function(QueuedMutation mutation) send) {
+    final Future<int>? inFlight = _inFlightFlush;
+    if (inFlight != null) {
+      return inFlight;
+    }
+    final Future<int> flush = _flush(send);
+    _inFlightFlush = flush;
+    unawaited(flush.whenComplete(() {
+      if (identical(_inFlightFlush, flush)) {
+        _inFlightFlush = null;
+      }
+    }));
+    return flush;
+  }
+
+  Future<int> _flush(
+      Future<void> Function(QueuedMutation mutation) send) async {
     var delivered = 0;
     while (_entries.isNotEmpty) {
       final QueuedMutation entry = _entries.first;
@@ -343,10 +391,14 @@ class OfflineMutationQueue {
         _recordFailure(entry, error);
         break;
       }
-      _entries.removeAt(0);
-      _ids.remove(entry.id);
-      delivered++;
-      _persist();
+      // The entry may have been removed (or the queue cleared) while the
+      // send was in flight; only drop it if it is still the head we sent.
+      if (_entries.isNotEmpty && identical(_entries.first, entry)) {
+        _entries.removeAt(0);
+        _ids.remove(entry.id);
+        delivered++;
+        _persist();
+      }
     }
     return delivered;
   }
@@ -361,6 +413,24 @@ class OfflineMutationQueue {
   QueuedMutation? _byKey(String idempotencyKey) {
     for (final QueuedMutation entry in _entries) {
       if (entry.idempotencyKey == idempotencyKey) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  /// The pending entry whose payload matches [document], [operationName] and
+  /// [variables] exactly, if any.
+  QueuedMutation? _byPayload(
+    String document,
+    String? operationName,
+    Map<String, dynamic> variables,
+  ) {
+    final String canonical = _canonicalVariablesJson(variables);
+    for (final QueuedMutation entry in _entries) {
+      if (entry.document == document &&
+          entry.operationName == operationName &&
+          _canonicalVariablesJson(entry.variables) == canonical) {
         return entry;
       }
     }
@@ -397,7 +467,10 @@ class OfflineMutationQueue {
 ///
 /// The key is deterministic (the same payload yields the same key across runs)
 /// and independent of variable ordering, so a mutation replayed after a restart
-/// is still recognized as the one that was queued.
+/// is still recognized as the one that was queued. It is a wire-facing tag, not
+/// a dedup token: [OfflineMutationQueue] deduplicates by comparing canonical
+/// payloads, because this hash is only as wide as the platform keeps its
+/// integers (dart2js truncates it to 32 bits, native keeps 64).
 String offlineIdempotencyKeyFor({
   required String document,
   String? operationName,
@@ -410,6 +483,10 @@ String offlineIdempotencyKeyFor({
   ]);
   return _fnv1a(payload);
 }
+
+/// The JSON form of the canonicalized [variables], for payload comparison.
+String _canonicalVariablesJson(Map<String, dynamic> variables) =>
+    jsonEncode(_canonicalize(variables));
 
 Object? _canonicalize(Object? value) {
   if (value is Map) {
@@ -424,8 +501,15 @@ Object? _canonicalize(Object? value) {
   return value;
 }
 
-/// FNV-1a, 64 bit. Deterministic across runs, which a persisted dedup key has
-/// to be.
+/// FNV-1a over the canonical payload. Deterministic across runs on one
+/// platform, which a persisted idempotency key has to be.
+///
+/// This is 64-bit FNV-1a on the VM. On web (dart2js) bitwise arithmetic
+/// truncates to 32 bits and the multiply loses precision past 2^53, so the
+/// key there is effectively ~32-bit and does not match what native computes.
+/// Nothing depends on that width: the queue never deduplicates on this value
+/// (entries are compared by their canonical payload), it only rides the
+/// replayed request as [OfflineIdempotencyKey].
 String _fnv1a(String input) {
   var hash = 0xcbf29ce484222325;
   for (final int byte in utf8.encode(input)) {

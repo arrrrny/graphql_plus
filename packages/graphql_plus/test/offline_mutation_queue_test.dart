@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:gql/language.dart';
 import 'package:graphql_plus/graphql_plus.dart';
 import 'package:test/test.dart';
@@ -66,6 +68,21 @@ void main() {
 
       expect(second, isNot(first));
       expect(queue.length, 2);
+    });
+
+    test('dedup compares payloads, so reordered variables still fold',
+        () async {
+      final queue = OfflineMutationQueue();
+
+      final first = await queue.enqueue(mutationRequest(
+        variables: <String, dynamic>{'text': 'x', 'n': 2},
+      ));
+      final second = await queue.enqueue(mutationRequest(
+        variables: <String, dynamic>{'n': 2, 'text': 'x'},
+      ));
+
+      expect(second, first);
+      expect(queue.length, 1);
     });
 
     test('deduplicate false keeps identical payloads apart', () async {
@@ -251,6 +268,111 @@ void main() {
 
       expect(delivered, 0);
       expect(calls, 0);
+    });
+
+    test('removing the head while its send is in flight keeps the rest',
+        () async {
+      final queue = OfflineMutationQueue();
+      final a = await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'a'}),
+      );
+      await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'b'}),
+      );
+
+      final sent = <String>[];
+      final release = Completer<void>();
+      final flushed = queue.flush((entry) async {
+        sent.add(entry.variables['text'] as String);
+        await release.future;
+      });
+
+      // a's send is in flight; drop it while the loop waits on `release`.
+      expect(await queue.remove(a), isTrue);
+      release.complete();
+
+      // `a` was already on the wire; the entry that shifted into slot 0 is
+      // still sent instead of being dropped with the removed head.
+      expect(await flushed, 1);
+      expect(sent, ['a', 'b']);
+      expect(queue.isEmpty, isTrue);
+    });
+
+    test('clearing the queue while its head send is in flight does not throw',
+        () async {
+      final queue = OfflineMutationQueue();
+      await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'a'}),
+      );
+      await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'b'}),
+      );
+
+      final sent = <String>[];
+      final release = Completer<void>();
+      final flushed = queue.flush((entry) async {
+        sent.add(entry.variables['text'] as String);
+        await release.future;
+      });
+
+      await queue.clear();
+      release.complete();
+
+      expect(await flushed, 0);
+      expect(sent, ['a']);
+      expect(queue.isEmpty, isTrue);
+    });
+
+    test('a failure on an entry removed mid-send leaves the queue untouched',
+        () async {
+      final queue = OfflineMutationQueue();
+      final a = await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'a'}),
+      );
+      await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'b'}),
+      );
+
+      final release = Completer<void>();
+      final flushed = queue.flush((entry) async {
+        await release.future;
+        throw StateError('socket closed');
+      });
+
+      expect(await queue.remove(a), isTrue);
+      release.complete();
+
+      expect(await flushed, 0);
+      expect(queue.pending.map((entry) => entry.variables['text']).toList(),
+          ['b']);
+      expect(queue.head?.attempts, 0);
+    });
+
+    test('a flush that starts while another is running joins it', () async {
+      final queue = OfflineMutationQueue();
+      await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'a'}),
+      );
+      await queue.enqueue(
+        mutationRequest(variables: <String, dynamic>{'text': 'b'}),
+      );
+
+      final sent = <String>[];
+      final release = Completer<void>();
+      final first = queue.flush((entry) async {
+        sent.add(entry.variables['text'] as String);
+        await release.future;
+      });
+
+      final second = queue.flush((_) async {});
+
+      expect(identical(first, second), isTrue);
+      release.complete();
+
+      expect(await first, 2);
+      expect(await second, 2);
+      expect(sent, ['a', 'b']);
+      expect(queue.isEmpty, isTrue);
     });
 
     test('remove drops one entry and keeps the rest in order', () async {

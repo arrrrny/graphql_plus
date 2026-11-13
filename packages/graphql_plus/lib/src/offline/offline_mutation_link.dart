@@ -104,6 +104,13 @@ class OfflineMutationLink extends Link {
         _failures = StreamController<OfflineMutationFailure>.broadcast() {
     _connectivitySubscription =
         connectivity.onConnectivityChanged.listen(_onConnectivityChanged);
+    // A queue restored from a durable store must drain even when this session
+    // never sees a connectivity change: the monitor only emits on edges, so a
+    // link built while the device is already online would otherwise wait
+    // indefinitely for an event that never comes.
+    if (connectivity.isOnline) {
+      scheduleMicrotask(() => unawaited(flush()));
+    }
   }
 
   final Link _forward;
@@ -123,7 +130,13 @@ class OfflineMutationLink extends Link {
 
   /// Emits every replay that could not be delivered.
   ///
-  /// The mutation stays queued; the next flush retries it.
+  /// The mutation stays queued; the next flush retries it. There is no attempt
+  /// cap: an entry that fails on every replay (a document that no longer
+  /// parses after a schema upgrade, for example) keeps its head position and
+  /// blocks newer writes behind it. The escape hatch is
+  /// [OfflineMutationQueue.remove] with the id carried by
+  /// [OfflineMutationException.mutationId] or [OfflineMutationFailure
+  /// .mutation.id] — drop the poison entry and the queue drains again.
   Stream<OfflineMutationFailure> get onReplayFailure => _failures.stream;
 
   /// Whether the client is online right now.

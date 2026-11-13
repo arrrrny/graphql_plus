@@ -187,6 +187,61 @@ void main() {
       expect(link.queue.isEmpty, isTrue);
     });
 
+    test('two flushes started together join into one drain', () async {
+      final seen = <Request>[];
+      final monitor = ManualConnectivityMonitor(isOnline: false);
+      final link = OfflineMutationLink(
+        forward: recordingLink(seen),
+        connectivity: monitor,
+      );
+      addTearDown(link.dispose);
+
+      await queueWhileOffline(link, <String>['a', 'b']);
+
+      final first = link.flush();
+      final second = link.flush();
+
+      expect(identical(first, second), isTrue);
+
+      expect(await first, 2);
+      expect(await second, 2);
+      expect(seen.map((request) => request.variables['text']).toList(),
+          ['a', 'b']);
+      expect(link.queue.isEmpty, isTrue);
+    });
+
+    test('a queue restored from a store drains when the link is built online',
+        () async {
+      final seen = <Request>[];
+      final store = InMemoryMutationQueueStore();
+      final offline = ManualConnectivityMonitor(isOnline: false);
+      final first = OfflineMutationLink(
+        forward: recordingLink(seen),
+        connectivity: offline,
+        queue: OfflineMutationQueue(store: store),
+      );
+      await queueWhileOffline(first, <String>['a', 'b']);
+      expect(first.queue.length, 2);
+      expect(seen, isEmpty);
+      await first.dispose();
+
+      // "Restart": a new link over the same durable store, already online. The
+      // monitor only emits on edges, so the drain must start from the
+      // constructor, not from a connectivity event.
+      final link = OfflineMutationLink(
+        forward: recordingLink(seen),
+        connectivity: ManualConnectivityMonitor(isOnline: true),
+        queue: OfflineMutationQueue(store: store),
+      );
+      addTearDown(link.dispose);
+
+      await waitFor(() => seen.length == 2);
+      await waitFor(() => link.queue.isEmpty);
+
+      expect(seen.map((request) => request.variables['text']).toList(),
+          ['a', 'b']);
+    });
+
     test('a transport failure keeps the mutation queued and is reported',
         () async {
       final monitor = ManualConnectivityMonitor(isOnline: false);
