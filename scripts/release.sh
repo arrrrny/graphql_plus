@@ -174,9 +174,16 @@ validate_flutter_locally() {
   local scratch client_abs
   client_abs="$(cd "$CLIENT_DIR" && pwd)"
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/graphql-plus-flutter-validate.XXXXXX")"
-  cp -R "$FLUTTER_DIR/." "$scratch/" || return 1
-  cat >>"$scratch/pubspec.yaml" <<EOF
-
+  # Copy the source, not the machine-local state: pubspec_overrides.yaml (melos,
+  # gitignored) carries a `../graphql_plus` path that exists only inside the
+  # monorepo, and .dart_tool/pubspec.lock/build would resolve against the old
+  # package_config. The override is rewritten with an ABSOLUTE path so the copy
+  # stands on its own.
+  (cd "$FLUTTER_DIR" && tar --exclude=./.dart_tool --exclude=./build \
+    --exclude=./pubspec.lock --exclude=./pubspec_overrides.yaml -cf - .) |
+    (cd "$scratch" && tar -xf -) || return 1
+  cat >"$scratch/pubspec_overrides.yaml" <<EOF
+# throwaway: validate against the local client before the client is on pub.dev
 dependency_overrides:
   $CLIENT_NAME:
     path: $client_abs
