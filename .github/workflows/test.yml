@@ -20,3 +20,10 @@ jobs:
         run: make ci_check_client
       - name: Tests (flutter)
         run: make ci_check_flutter
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint GitHub Actions workflows
+        run: docker run --rm -v "$(pwd):/repo" --workdir /repo rhysd/actionlint:latest -color

@@ -1,0 +1,31 @@
+name: 'Check publish credentials'
+description: 'Skip publishing when CREDENTIAL_JSON is absent, and fail loudly on a real release event.'
+inputs:
+  credential_json:
+    description: 'The CREDENTIAL_JSON secret value.'
+    required: false
+    default: ''
+outputs:
+  skip:
+    value: ${{ steps.check.outputs.skip }}
+    description: "'true' when CREDENTIAL_JSON is absent, 'false' otherwise."
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      run: |
+        if [ -z "${CREDENTIAL_JSON:-}" ]; then
+          echo "::warning::CREDENTIAL_JSON is not configured; skipping publish."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        CREDENTIAL_JSON: ${{ inputs.credential_json }}
+    - name: 'Fail loudly when a real release cannot publish'
+      if: github.event_name == 'release' && steps.check.outputs.skip == 'true'
+      shell: bash
+      run: |
+        echo "::error::CREDENTIAL_JSON is missing — this release will not be published."
+        exit 1

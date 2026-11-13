@@ -3,8 +3,6 @@ name: Release (dart)
 on:
   release:
     types: [created]
-    tags:
-      - graphql_plus-v*
   workflow_run:
     workflows:
       - "Test"
@@ -22,15 +20,9 @@ jobs:
 
       - name: 'Check publish credentials'
         id: creds
-        run: |
-          if [ -z "${CREDENTIAL_JSON:-}" ]; then
-            echo "::notice::CREDENTIAL_JSON is not configured; skipping publish."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          CREDENTIAL_JSON: ${{ secrets.CREDENTIAL_JSON }}
+        uses: ./.github/actions/check-publish-creds
+        with:
+          credential_json: ${{ secrets.CREDENTIAL_JSON }}
 
       - name: 'publish graphql_plus to Pub.dev'
         if: steps.creds.outputs.skip == 'false'
