@@ -370,12 +370,17 @@ void main() {
       final fastServer = await HttpServer.bind('localhost', 0);
       final fastServerUrl = 'http://localhost:${fastServer.port}/graphql';
       var requestCount = 0;
+      final firstRequestInFlight = Completer<void>();
 
       fastServer.listen((request) async {
         requestCount++;
         final currentRequest = requestCount;
         // First request is slow, others are fast
         if (currentRequest == 1) {
+          // Signal that the request has actually reached the server, so the test
+          // never has to guess when it is in flight.
+          if (!firstRequestInFlight.isCompleted)
+            firstRequestInFlight.complete();
           await Future<void>.delayed(Duration(seconds: 3));
         }
         request.response.statusCode = 200;
@@ -410,8 +415,10 @@ void main() {
           ),
         );
 
-        // Cancel first request after ensuring it's in flight
-        await Future<void>.delayed(Duration(milliseconds: 100));
+        // Cancel once the server has the request. A fixed delay here was the flake:
+        // under full-suite load the request could still be in setup, and cancelling
+        // then raced the link's abort-trigger wiring.
+        await firstRequestInFlight.future.timeout(const Duration(seconds: 10));
         token1.cancel();
 
         // Second request should complete successfully
