@@ -1137,110 +1137,110 @@ Future<void> main() async {
   group('SocketClient graphql-transport-ws keepalive', () {
     test('closes the connection when a ping goes unanswered past the deadline',
         () async {
-          var pings = 0;
-          final server = await startServer(
-            onMessage: (socket, data) {
-              final message = json.decode(data.toString());
-              switch (message['type']) {
-                case 'connection_init':
-                  socket.add(json.encode({'type': 'connection_ack'}));
-                  break;
-                case 'ping':
-                  pings++;
-                  // Never answer with `pong`: the peer is half-open / dead.
-                  break;
-              }
-            },
-          );
+      var pings = 0;
+      final server = await startServer(
+        onMessage: (socket, data) {
+          final message = json.decode(data.toString());
+          switch (message['type']) {
+            case 'connection_init':
+              socket.add(json.encode({'type': 'connection_ack'}));
+              break;
+            case 'ping':
+              pings++;
+              // Never answer with `pong`: the peer is half-open / dead.
+              break;
+          }
+        },
+      );
 
-          final client = SocketClient(
-            'ws://127.0.0.1:${server.port}',
-            protocol: GraphQLProtocol.graphqlTransportWs,
-            config: SocketClientConfig(
-              autoReconnect: false,
-              inactivityTimeout: const Duration(milliseconds: 200),
-            ),
-          );
-          addTearDown(client.dispose);
+      final client = SocketClient(
+        'ws://127.0.0.1:${server.port}',
+        protocol: GraphQLProtocol.graphqlTransportWs,
+        config: SocketClientConfig(
+          autoReconnect: false,
+          inactivityTimeout: const Duration(milliseconds: 200),
+        ),
+      );
+      addTearDown(client.dispose);
 
-          await client.connectionState
-              .where((state) => state == SocketConnectionState.connected)
-              .first;
+      await client.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
 
-          var closed = false;
-          final sub = client.connectionState.listen((state) {
-            if (state == SocketConnectionState.notConnected) {
-              closed = true;
-            }
-          });
+      var closed = false;
+      final sub = client.connectionState.listen((state) {
+        if (state == SocketConnectionState.notConnected) {
+          closed = true;
+        }
+      });
 
-          // First ping fires at 200ms; if no `pong` arrives within the 200ms deadline,
-          // `_closeSocketChannel()` must transition the connection to `notConnected`.
-          await waitForCondition(
-            () => closed,
-            message: 'the connection to be closed after the pong deadline',
-          );
-          await sub.cancel();
-          expect(pings, greaterThanOrEqualTo(1),
-              reason: 'at least one ping must have been sent before the deadline');
-        });
+      // First ping fires at 200ms; if no `pong` arrives within the 200ms deadline,
+      // `_closeSocketChannel()` must transition the connection to `notConnected`.
+      await waitForCondition(
+        () => closed,
+        message: 'the connection to be closed after the pong deadline',
+      );
+      await sub.cancel();
+      expect(pings, greaterThanOrEqualTo(1),
+          reason: 'at least one ping must have been sent before the deadline');
+    });
 
     test('keeps the connection open when the peer answers ping with pong',
         () async {
-          var pings = 0;
-          final server = await startServer(
-            onMessage: (socket, data) {
-              final message = json.decode(data.toString());
-              switch (message['type']) {
-                case 'connection_init':
-                  socket.add(json.encode({'type': 'connection_ack'}));
-                  break;
-                case 'ping':
-                  pings++;
-                  socket.add(json.encode({'type': 'pong'}));
-                  break;
-              }
-            },
-          );
+      var pings = 0;
+      final server = await startServer(
+        onMessage: (socket, data) {
+          final message = json.decode(data.toString());
+          switch (message['type']) {
+            case 'connection_init':
+              socket.add(json.encode({'type': 'connection_ack'}));
+              break;
+            case 'ping':
+              pings++;
+              socket.add(json.encode({'type': 'pong'}));
+              break;
+          }
+        },
+      );
 
-          final client = SocketClient(
-            'ws://127.0.0.1:${server.port}',
-            protocol: GraphQLProtocol.graphqlTransportWs,
-            config: SocketClientConfig(
-              autoReconnect: false,
-              inactivityTimeout: const Duration(milliseconds: 200),
-            ),
-          );
-          addTearDown(client.dispose);
+      final client = SocketClient(
+        'ws://127.0.0.1:${server.port}',
+        protocol: GraphQLProtocol.graphqlTransportWs,
+        config: SocketClientConfig(
+          autoReconnect: false,
+          inactivityTimeout: const Duration(milliseconds: 200),
+        ),
+      );
+      addTearDown(client.dispose);
 
-          await client.connectionState
-              .where((state) => state == SocketConnectionState.connected)
-              .first;
+      await client.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
 
-          await waitForCondition(
-            () => pings >= 3,
-            message: 'three ping/pong cycles to complete',
-          );
+      await waitForCondition(
+        () => pings >= 3,
+        message: 'three ping/pong cycles to complete',
+      );
 
-          var sawDisconnect = false;
-          final subscription = client.connectionState.listen((state) {
-            if (state == SocketConnectionState.notConnected) {
-              sawDisconnect = true;
-            }
-          });
-          await Future<void>.delayed(const Duration(milliseconds: 500));
-          await subscription.cancel();
+      var sawDisconnect = false;
+      final subscription = client.connectionState.listen((state) {
+        if (state == SocketConnectionState.notConnected) {
+          sawDisconnect = true;
+        }
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      await subscription.cancel();
 
-          expect(sawDisconnect, isFalse,
-              reason:
-                  'a responsive peer answering pings must never be force-closed');
-          expect(
-            await client.connectionState.firstWhere(
-              (state) => state == SocketConnectionState.connected,
-            ),
-            SocketConnectionState.connected,
-          );
-        });
+      expect(sawDisconnect, isFalse,
+          reason:
+              'a responsive peer answering pings must never be force-closed');
+      expect(
+        await client.connectionState.firstWhere(
+          (state) => state == SocketConnectionState.connected,
+        ),
+        SocketConnectionState.connected,
+      );
+    });
 
     test('keeps pinging a peer that chatters unsolicited pongs', () async {
       var pings = 0;
