@@ -18,6 +18,16 @@
   - Note: forwarding now uses `await for` instead of `yield*`. Inside an `async*` generator the
     error from a `yield*`-ed stream is delivered to the listener rather than thrown at the
     `yield*`, so a surrounding `catch` never sees it and a replay there is dead code.
+  - Concurrent failed requests share a single in-flight refresh: `getToken` is called once per
+    refresh, not once per request. `getToken` should therefore be cheap and idempotent (read an
+    already-refreshed value such as `() => authStore.token`) rather than performing the refresh
+    itself.
+  - A replay is cancellable: if the consumer cancels its subscription while the refresh or the
+    replay is in flight, no replay is sent and no further events are emitted. If the refresh or
+    replay itself throws, the **original** error is surfaced rather than the secondary failure.
+  - **Changed:** `AuthLink` no longer removes or alters the request context on replay. The
+    replayed request carries the same context entries (for example `HttpLinkHeaders`) as the
+    original, so a trace header or similar survives the refresh.
 
 ## Fixed
 - **A partial `optimisticResult` no longer blanks cache fields it omits** (closes #3,

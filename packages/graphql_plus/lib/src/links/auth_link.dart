@@ -15,6 +15,12 @@ class AuthLink extends Link {
   });
 
   /// Authentication callback. Note – must include prefixes, e.g. `'Bearer $token'`
+  ///
+  /// This is called once per request, and once more for a refresh-and-replay. It must be
+  /// **idempotent and cheap**: concurrent 401s share a single in-flight refresh (see
+  /// [_refreshing]), but a callback that mints a *different* token on every call will still
+  /// hand a different value to each replay. Prefer reading an already-refreshed value (for
+  /// example `() => authStore.token`) over performing the refresh inside this callback.
   final FutureOr<String?> Function() getToken;
 
   /// Header key to set to the result of [getToken]
@@ -38,7 +44,8 @@ class AuthLink extends Link {
   /// ```
   ///
   /// Only one replay is attempted: an operation that fails again after the refresh surfaces the
-  /// second error rather than looping.
+  /// second error rather than looping. If the consumer cancels its subscription while the
+  /// refresh or the replay is in flight, no replay is sent and no further events are emitted.
   final FutureOr<bool> Function(Object error)? onAuthError;
 
   /// Builds the request with the current token in [headerKey].
@@ -48,40 +55,114 @@ class AuthLink extends Link {
     FutureOr<String?> Function() getToken,
   ) async {
     final token = await getToken();
-    return request.updateContextEntry<HttpLinkHeaders>(
-      (headers) => HttpLinkHeaders(
-        headers: <String, String>{
-          ...headers?.headers ?? <String, String>{},
-          if (token != null) headerKey: token,
-        },
-      ),
-    );
+    return _applyToken(request, headerKey, token);
+  }
+
+  /// Returns [request] with [token] written to [headerKey], without fetching it.
+  static Request _applyToken(
+    Request request,
+    String headerKey,
+    String? token,
+  ) =>
+      request.updateContextEntry<HttpLinkHeaders>(
+        (headers) => HttpLinkHeaders(
+          headers: <String, String>{
+            ...headers?.headers ?? <String, String>{},
+            if (token != null) headerKey: token,
+          },
+        ),
+      );
+
+  /// The single in-flight refresh shared by every operation that hits a 401 at the same time.
+  ///
+  /// Without this, N parallel requests that all observe an expired token each call [getToken]
+  /// once, so a caller that rotates tokens per call would hand out N different "fresh" tokens
+  /// for one refresh. The future resolves to the refreshed token; every concurrent caller
+  /// receives the same value.
+  Future<String?>? _refreshing;
+
+  Future<String?> _refresh() {
+    final existing = _refreshing;
+    if (existing != null) return existing;
+    final future = Future<String?>.sync(getToken);
+    _refreshing = future;
+    future.whenComplete(() {
+      if (identical(_refreshing, future)) _refreshing = null;
+    });
+    return future;
   }
 
   @override
   Stream<Response> request(
     Request request, [
     NextLink? forward,
-  ]) async* {
-    final req = await _withToken(request, headerKey, getToken);
+  ]) {
     final next = forward!;
+    return Stream<Response>.multi((controller) {
+      StreamSubscription<Response>? forwardSub;
+      var cancelled = false;
+      var replaying = false;
 
-    try {
-      // Deliberately `await for` rather than `yield*`: inside an `async*` generator a
-      // `yield*`-ed stream's error is forwarded to the listener instead of being thrown at
-      // the `yield*`, so a surrounding try/catch never sees it and the replay below would be
-      // dead code. See the "Auth refresh and replay" tests.
-      await for (final response in next(req)) {
-        yield response;
+      Future<void> refreshAndReplay(
+        Object originalError,
+        StackTrace originalStack,
+      ) async {
+        replaying = true;
+        try {
+          final refreshedToken = await _refresh();
+          if (cancelled) return;
+          // Reuse the token the shared refresh produced rather than calling getToken again:
+          // a caller that rotates tokens per call must not hand a second value to the replay.
+          final retried = _applyToken(request, headerKey, refreshedToken);
+          if (cancelled) return;
+
+          await for (final response in next(retried)) {
+            if (cancelled) break;
+            controller.add(response);
+          }
+          if (!cancelled) await controller.close();
+        } catch (_) {
+          // The replay itself failed. Surface the *original* error: it is the one the caller
+          // cares about, and a failure while refreshing must not mask it.
+          if (!cancelled) controller.addError(originalError, originalStack);
+        }
       }
-    } catch (error) {
-      if (onAuthError == null || !await onAuthError!(error)) {
-        rethrow;
+
+      Future<void> run() async {
+        try {
+          final req = await _withToken(request, headerKey, getToken);
+          if (cancelled) return;
+          forwardSub = next(req).listen(
+            controller.add,
+            onError: (Object error, StackTrace stack) async {
+              // Not an auth failure, or the caller declined a refresh: surface it unchanged.
+              if (replaying || cancelled || onAuthError == null) {
+                if (!cancelled) controller.addError(error, stack);
+                return;
+              }
+              final refresh = await onAuthError!(error);
+              if (!refresh || cancelled || replaying) {
+                if (!cancelled) controller.addError(error, stack);
+                return;
+              }
+              refreshAndReplay(error, stack);
+            },
+            onDone: () {
+              if (!cancelled && !replaying) controller.close();
+            },
+            cancelOnError: true,
+          );
+        } catch (error, stack) {
+          // A synchronous throw from getToken/forward is not an auth failure to replay.
+          if (!cancelled) controller.addError(error, stack);
+        }
       }
-      final retried = await _withToken(request, headerKey, getToken);
-      await for (final response in next(retried)) {
-        yield response;
-      }
-    }
+
+      controller.onCancel = () async {
+        cancelled = true;
+        await forwardSub?.cancel();
+      };
+      run();
+    });
   }
 }
