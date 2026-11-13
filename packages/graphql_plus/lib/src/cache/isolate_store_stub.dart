@@ -2,9 +2,10 @@ import 'package:graphql_plus/src/cache/store.dart';
 
 /// Web fallback for [IsolateStore]: `dart:isolate` does not exist there.
 ///
-/// Throws [UnsupportedError] on every call rather than quietly degrading to a
-/// UI-thread store, so a caller that asked for background persistence learns it
-/// did not get it.
+/// Throws [UnsupportedError] on construction and on every mutation rather than
+/// quietly degrading to a UI-thread store, so a caller that asked for
+/// background persistence learns it did not get it. [close] is a no-op: there
+/// is no worker to shut down.
 class IsolateStore extends Store {
   IsolateStore._();
 

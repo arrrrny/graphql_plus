@@ -31,7 +31,10 @@ import 'package:graphql_plus/src/cache/store.dart';
 /// normalized graph is held on the UI isolate as well as on the worker. What
 /// moves off-isolate is the encode plus the write, which is where the jank
 /// came from. A caller that needs the mirror to be authoritative must not
-/// mutate the worker's box behind this store's back.
+/// mutate the worker's box behind this store's back. Maps returned by [get]
+/// and [toMap] are live references into the mirror, not snapshots: mutating
+/// them corrupts the mirror without reaching the worker's box, so the cache
+/// would read the mutated value now and silently lose it on reopen.
 ///
 /// **Ordering.** Sends on a [SendPort] are FIFO, so the worker applies
 /// mutations in the order they were made. [flush] is the await point that
@@ -224,8 +227,11 @@ class _IsolateSession {
 
     session = _IsolateSession._(replies, exits);
 
+    // Held outside the try so the catch below can kill a worker that spawned
+    // but never answered.
+    Isolate? isolate;
     try {
-      final isolate = await Isolate.spawn<_IsolateBoot>(
+      isolate = await Isolate.spawn<_IsolateBoot>(
         _isolateEntry,
         _IsolateBoot(replies.sendPort, spec),
       );
@@ -240,6 +246,10 @@ class _IsolateSession {
       session._commands = workerPort;
       return session;
     } on Object {
+      // The worker is already running: a wedged one never exits on its own, and
+      // if it opened its Hive box it holds the box lock, which would break every
+      // later `IsolateStore.hive` for the same box name until this process dies.
+      isolate?.kill(priority: Isolate.immediate);
       replies.close();
       exits.close();
       rethrow;
@@ -413,6 +423,12 @@ Future<Object?> _apply(Store store, Map<Object?, Object?> request) async {
     case 'snapshot':
       return store.toMap();
     case 'flush':
+      // [HiveStore.put] and friends fire Hive's futures without awaiting them,
+      // so the writes are merely queued on the backend at this point. Touch
+      // Hive's own write-sync hook the way `reset` does, or the ack below would
+      // report durability that has not happened yet.
+      if (store is HiveStore) await store.box.flush();
+      return null;
     case 'shutdown':
       return null;
     default:
