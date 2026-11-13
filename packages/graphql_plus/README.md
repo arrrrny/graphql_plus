@@ -1041,6 +1041,83 @@ When combining links, **it is important to note that**:
 - Terminating links like `HttpLink` and `WebSocketLink` must come at the end of a route, and will not call links following them.
 - Link order is very important. In `HttpLink(myEndpoint).concat(AuthLink(getToken: authenticate))`, the `AuthLink` will never be called.
 
+### Offline mutations
+
+`OfflineMutationLink` queues the mutations a client makes without connectivity
+and replays them, in the order they were made, once the network is back. It
+wraps the link that does the sending, so it works with any terminating link.
+
+```dart
+final queue = OfflineMutationQueue(store: myDurableStore);
+final link = OfflineMutationLink(
+  forward: HttpLink(uri: myEndpoint),
+  connectivity: myConnectivityMonitor,
+  queue: queue,
+);
+link.onDelivered.listen((delivery) {
+  // the server answered this queued mutation
+  print(delivery.response.data);
+});
+final client = GraphQLClient(link: link, cache: cache);
+```
+
+**⚠️ The replay bypasses the surrounding chain.** A replay goes through
+`forward`, never through the links the `OfflineMutationLink` sits between. Every
+link a replayed write needs — auth, retry, anything that shapes the request —
+must sit inside `forward`. The composition below sends live mutations *with*
+auth headers and replays queued ones *without* them, so every queued write fails
+auth after the reconnect:
+
+```dart
+// ✗ AuthLink only sees the live path — replays skip it:
+final wrong = AuthLink(getToken: getToken)
+    .concat(OfflineMutationLink(forward: HttpLink(uri: myEndpoint)));
+
+// ✓ auth sits inside forward, so live and replayed writes both pass through it:
+final right = OfflineMutationLink(
+  forward: AuthLink(getToken: getToken).concat(HttpLink(uri: myEndpoint)),
+  connectivity: myConnectivityMonitor,
+  queue: queue,
+);
+```
+
+- A `ConnectivityMonitor` reports connectivity; `ManualConnectivityMonitor`
+  lets a host that already owns the signal set it by hand.
+- Queries, subscriptions and mutations made while online are forwarded
+  untouched. A mutation made offline is stored in the queue and its request
+  resolves with an `OfflineMutationException` naming the queue id — the write is
+  not lost, it is waiting.
+- Replay happens on reconnect — or when the link is built while the device is
+  already online, so a queue restored from a durable store drains at startup
+  without the host having to call `flush()` by hand — one entry at a time,
+  oldest first. Each replayed request carries an `OfflineIdempotencyKey` in its
+  context, so a server that understands an idempotency header can tell a replay
+  from a new write.
+- An identical payload (same document, operation name and variables) is queued
+  once; pass `deduplicate: false` to keep every call. Entries are compared by
+  their canonical payload, not by the hashed idempotency key, so the web build
+  (where the hash is narrower) deduplicates just as strictly.
+- A replay that cannot be delivered (transport failure) stays at the head of the
+  queue with its attempt count incremented and is surfaced on
+  `OfflineMutationLink.onReplayFailure`. A response carrying GraphQL errors
+  counts as delivered: the server answered, so the entry leaves the queue and is
+  emitted on `onDelivered` for the app to inspect. There is no attempt cap: an
+  entry that fails on every replay (a document that no longer parses after a
+  schema upgrade, for example) keeps the head position and blocks newer writes
+  behind it — `queue.remove(id)`, with the id from the
+  `OfflineMutationException` or the `OfflineMutationFailure`, drops it.
+- The replayed request carries only the `OfflineIdempotencyKey` in its context.
+  A `Context` is not serializable, so entries the app attached to
+  `MutationOptions.context` (request shaping handled by links, tracing data, …)
+  do not survive the queue and do not reach the replayed write.
+- Persistence is a `MutationQueueStore` — the default keeps the queue in memory
+  only. Implement the store on top of Hive or a database to survive a restart.
+  `read()` is synchronous, so the durable storage must be opened and loaded
+  before the queue (and the link) is constructed.
+
+See [specs/005-offline-mutation-queue/spec.md](../../specs/005-offline-mutation-queue/spec.md)
+for the requirements.
+
 ### AWS AppSync Support
 
 **Cognito Pools**
