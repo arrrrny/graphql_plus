@@ -42,6 +42,7 @@ As of `v4`, it is built on foundational libraries from the [gql-dart project], i
     - [`FragmentRequest`, `readFragment`, and `writeFragment`](#fragmentrequest-readfragment-and-writefragment)
   - [Other Cache Considerations](#other-cache-considerations)
     - [Write strictness and `partialDataPolicy`](#write-strictness-and-partialdatapolicy)
+    - [Expiry, eviction and manual invalidation](#expiry-eviction-and-manual-invalidation)
     - [Possible cache write exceptions](#possible-cache-write-exceptions)
   - [Policies](#policies)
     - [Rebroadcasting](#rebroadcasting)
@@ -887,6 +888,53 @@ As of [#754](https://github.com/zino-app/graphql-flutter/pull/754) we can now en
 
 By default, optimistic data is excluded from these constraints for ease of use via `PartialDataCachePolicy.acceptForOptimisticData`, as it is easy to miss `__typename`, etc.
 This behavior is configurable via `GraphQLCache.partialDataPolicy`, which can be set to `accept` for no constraints or `reject` for full constraints.
+
+### Expiry, eviction and manual invalidation
+
+By default cached entities live forever. A cache can now be bounded, either by age or by size, and
+driven by hand:
+
+```dart
+final cache = GraphQLCache(
+  // every entity expires after 5 minutes, refreshed by every write
+  defaultTtl: const Duration(minutes: 5),
+  // ...except these, which expire sooner
+  typeTtl: const {
+    'User': Duration(seconds: 30),
+    'ROOT_QUERY': Duration(seconds: 90),
+  },
+  // at most 500 entities, and at most ~128 MB of them
+  maxEntries: 500,
+  maxSizeBytes: 128 * 1024 * 1024,
+);
+```
+
+- `defaultTtl` is the global TTL; `typeTtl` overrides it per `__typename`, including `ROOT_QUERY`
+  and `ROOT_MUTATION`. `setTtl(dataId, ttl)` overrides both for one entity, and `setTtl(dataId, null)`
+  removes that override.
+- Expiry is lazy but collected: a read returns `null` for an expired entity and the same pass drops
+  it from the store, so an entity nothing reads is still reclaimed as soon as the cache is touched.
+  A write re-arms the TTL of the entity it writes.
+- `maxEntries` and `maxSizeBytes` bound the store. When either is exceeded the least recently used
+  entities are evicted on write; reads count as a use, so an entry that is being watched is not the
+  one evicted. Sizes are estimated from each entity's JSON encoding. An entity larger than the whole
+  `maxSizeBytes` budget on its own is kept, since dropping it would make every write a miss.
+- For app-driven cache management:
+
+```dart
+cache.evict('User:1');            // drop one entity
+cache.evictAll(typeName: 'User'); // drop every entity of a type
+cache.evictAll();                 // drop everything
+cache.invalidate('User:1');       // drop it on the next read
+cache.clear();                    // empty the store and its bookkeeping
+```
+
+  Prefer `clear()` over `cache.store.reset()`: resetting the store directly leaves the bookkeeping
+  behind, and the next writes would evict against entries that no longer exist.
+
+These methods live on `GraphQLCache`, not on the cache proxies, and an eviction or invalidation
+requests a rebroadcast so watching queries read the cache again. A query whose data was evicted
+reads as a cache miss and refetches according to its `fetchPolicy`.
 
 ### Possible cache write exceptions
 

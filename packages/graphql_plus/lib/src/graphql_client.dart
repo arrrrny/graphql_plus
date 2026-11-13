@@ -372,11 +372,11 @@ class GraphQLClient implements GraphQLDataProxy {
     queryManager.maybeRebroadcastQueriesAsync();
   }
 
-  /// Resets the contents of the store with [cache.store.reset()]
+  /// Resets the contents of the store with [GraphQLCache.clear]
   /// and then refetches of all queries unless [refetchQueries] is disabled
   @experimental
   Future<List<QueryResult?>>? resetStore({bool refetchQueries = true}) {
-    cache.store.reset();
+    cache.clear();
     if (refetchQueries) {
       return queryManager.refetchSafeQueries();
     }
