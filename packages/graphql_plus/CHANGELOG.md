@@ -1,4 +1,4 @@
-# Unreleased
+# v5.3.0
 
 ## Added
 - **`WebSocketLink.connectionState`** — a stable `Stream<SocketConnectionState>` on the link, so

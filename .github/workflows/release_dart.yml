@@ -13,6 +13,12 @@ on:
 
 jobs:
   publishing:
+    # 'release' has no tag filter — GitHub ignores `tags:` under `on: release`,
+    # so every release event reaches this job. Gate on the tag name here, or a
+    # client release would also publish the flutter package (see PUBLISH.md).
+    if: >-
+      github.event_name != 'release' ||
+      startsWith(github.event.release.tag_name, 'graphql_plus-v')
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout'
