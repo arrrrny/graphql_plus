@@ -318,7 +318,8 @@ void main() {
       expect(server.hits, 2, reason: 'the operation must be re-sent');
     });
 
-    test('a consumer that cancels during the refresh sends no replay', () async {
+    test('a consumer that cancels during the refresh sends no replay',
+        () async {
       final server = _AuthServer(
         firstStatus: 401,
         firstResponse: {
@@ -393,8 +394,14 @@ void main() {
         _AlwaysFailingLink(),
       ]);
 
-      final first = link.request(_viewerRequest()).toList().catchError((_) => <Response>[]);
-      final second = link.request(_viewerRequest()).toList().catchError((_) => <Response>[]);
+      final first = link
+          .request(_viewerRequest())
+          .toList()
+          .catchError((_) => <Response>[]);
+      final second = link
+          .request(_viewerRequest())
+          .toList()
+          .catchError((_) => <Response>[]);
       // Let both requests reach the refresh before releasing it.
       await Future<void>.delayed(const Duration(milliseconds: 100));
       refreshGate.complete();
@@ -404,7 +411,8 @@ void main() {
       expect(
         calls,
         3,
-        reason: 'two initial fetches plus one shared refresh (not one per request)',
+        reason:
+            'two initial fetches plus one shared refresh (not one per request)',
       );
     });
   });
