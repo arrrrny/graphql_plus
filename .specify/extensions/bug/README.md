@@ -9,9 +9,9 @@ This extension delivers an opinionated, repeatable bug workflow that any AI codi
 1. **Assess** — read a bug report (pasted text or a URL), judge whether it is a real bug, locate suspected code paths, and propose a remediation. `assess` writes a *local* assessment only; it does **not** file a GitHub issue.
 2. **Load** (alternative entry point) — `speckit.bug.fetch` pulls an *existing* GitHub issue (by number, URL, or `owner/repo#n`) via `gh`, records it as `issue.md`, and seeds an `assessment.md` draft. Use this when the bug is already tracked on GitHub and you want to triage and fix it here — instead of starting from a pasted report.
 3. **Report** (optional) — `speckit.bug.issue` turns an assessment into a tracked GitHub issue via `gh`, recording the issue link. `assess` can auto-trigger this with `--issue` or the `auto_create_issue` config. `fetch` already produces `issue.md`, so `issue` is normally skipped after a load.
-3. **Fix** — apply the proposed remediation and record exactly what changed. Pass `--branch` (or `--worktree`) to isolate the fix on its own git branch.
-4. **Open PR** (optional) — `speckit.bug.pr` opens a pull request from the fix branch, linking the issue.
-5. **Test** — re-run the reproduction and any added tests, then record the verification result.
+4. **Fix** — apply the proposed remediation and record exactly what changed. Pass `--branch` (or `--worktree`) to isolate the fix on its own git branch.
+5. **Open PR** (optional) — `speckit.bug.pr` opens a pull request from the fix branch, linking the issue.
+6. **Test** — re-run the reproduction and any added tests, then record the verification result.
 
 The stages communicate through Markdown files in a single per-bug directory:
 
@@ -102,7 +102,7 @@ specify extension enable bug
 
 The extension reads `.specify/extensions/bug/bug-config.yml` (copied from `config-template.yml` on install). Options:
 
-- `auto_create_issue` (`true`) — when `true`, `speckit.bug.assess` files the GitHub issue automatically after writing the assessment. Set to `false` to opt out. The `--issue` flag overrides this per run.
+- `auto_create_issue` (`false`) — when `true`, `speckit.bug.assess` files the GitHub issue automatically after writing the assessment. Set to `false` to opt out (the shipped default). The `--issue` flag overrides this per run.
 - `branch_prefix` (`"fix"`) — prefix for the fix branch created by `speckit.bug.fix --branch` / `--worktree` (branch is `<prefix>/<slug>`, e.g. `fix/login-timeout`).
 - `default_host` (`"github"`) — Git host used when creating issues/PRs.
 
@@ -133,8 +133,8 @@ This extension registers one hook:
 - **`after_bug_assess`** → `speckit.bug.issue` — a **mandatory** (Automatic) hook that files the
   GitHub issue after `speckit.bug.assess` writes the assessment. It is bound as `optional: false` but
   gated by the `auto_create_issue` config condition (`config.auto_create_issue == 'true'`), so it only
-  executes when that setting is enabled. With `auto_create_issue: false` (the opt-out — the
-  shipped template defaults to `true`) the condition fails and the hook is skipped, so `assess`
+  executes when that setting is enabled. With `auto_create_issue: false` (the shipped default —
+  the opt-out) the condition fails and the hook is skipped, so `assess`
   only *suggests* the issue step.
 
 This is how the `auto_create_issue` setting takes effect: it is not re-read inline by `assess`. Instead,

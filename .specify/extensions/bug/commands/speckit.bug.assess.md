@@ -20,6 +20,16 @@ The user input contains the bug description and (optionally) a slug. Treat it as
 
 If both a URL and text are present, fetch the URL and merge its content with the pasted text when forming the bug summary.
 
+### `--issue` (issue auto-creation override)
+
+`--issue` in `$ARGUMENTS` requests that the GitHub issue be filed for this run. Strip it from the description before forming the bug summary. It enables the `auto_create_issue` setting for this run only — `bug-config.yml` is never edited.
+
+This command does **not** call `gh` itself. Auto-filing is driven by the extension's `after_bug_assess` hook (`speckit.bug.issue`), whose `condition` reads the `auto_create_issue` config. So `--issue` is honoured only while that hook is bound; the three cases are:
+
+- `auto_create_issue: true` in `.specify/extensions/bug/bug-config.yml` — the hook fires automatically after the assessment is written, with or without the flag.
+- `--issue`, setting `false` — the hook should fire for this run. If it does not (the hook is not registered in this checkout — check `.specify/extensions/bug/extension.yml` for `hooks.after_bug_assess`), say so explicitly and offer `__SPECKIT_COMMAND_BUG_ISSUE__ slug=<BUG_SLUG>` as the next step rather than claiming the issue was filed.
+- Neither — the assessment is written and the issue step is only *suggested*.
+
 ## Slug Resolution
 
 Each bug gets its own directory under `.specify/bugs/<slug>/`. Resolve the slug in this order:
@@ -163,7 +173,8 @@ Do not attempt to validate the URL by issuing a preflight `HEAD` (or any other) 
    - The slug used and whether it was user-provided, asked-for, or auto-generated. State it on its own line (e.g. `Slug: <BUG_SLUG>`) so it is easy to spot — downstream commands in the same session may reuse it from context without re-prompting.
    - The path `.specify/bugs/<BUG_SLUG>/assessment.md`.
    - The verdict and severity.
-   - The next suggested step: `__SPECKIT_COMMAND_BUG_FIX__ slug=<BUG_SLUG>`.
+   - Whether the GitHub issue was auto-filed (by the `after_bug_assess` hook), and its URL when it was.
+   - The next suggested step: `__SPECKIT_COMMAND_BUG_FIX__ slug=<BUG_SLUG>` (or `__SPECKIT_COMMAND_BUG_ISSUE__ slug=<BUG_SLUG>` when `--issue` was requested and the hook did not fire).
 
 ## Guardrails
 
@@ -171,3 +182,4 @@ Do not attempt to validate the URL by issuing a preflight `HEAD` (or any other) 
 - Never invent reproduction steps or file paths that are not supported by either the report or the codebase.
 - Never overwrite an existing `assessment.md` without confirmation.
 - If the bug report cannot be understood at all (empty, unrelated, spam), set verdict to `invalid` with a clear reason and stop.
+- `--issue` never causes this command to call `gh` itself, and never edits `bug-config.yml` — the per-run override is not persisted.
