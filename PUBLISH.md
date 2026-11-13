@@ -28,9 +28,15 @@ The script refuses to run unless:
 - the tree is clean, on `master`, and in sync with `origin/master`;
 - both `pubspec.yaml` versions are set and both `CHANGELOG.md` files already
   carry a `# v<version>` section for them (the changelog is the release notes);
-- both packages pass `pub publish --dry-run`;
+- both packages pass `pub publish --dry-run` — the client for real, the flutter
+  package in a throwaway copy against the **local** client (pub.dev refuses a
+  constraint naming a version it has never served), then again for real against
+  the registry once the client is live;
 - a publish credential exists (below) — for a real publish; a dry run stops
-  before the credential check, and the workflow path warns and requires `--yes`.
+  before the credential check. The workflow path **refuses** without
+  `CREDENTIAL_JSON` rather than tagging a release nothing would ship; only an
+  unreadable secrets API (no repo admin) downgrades that to a warning that
+  needs `--yes`.
 
 It then tags `graphql_plus-v<client>` and `graphql_flutter_plus-v<flutter>`,
 creates the matching GitHub releases (whose notes are the changelog section),
@@ -58,7 +64,9 @@ credential:
   a missing secret prints a warning and **skips** the publish step, and on a
   real `release` event it **fails the run loudly** rather than pretending a
   release shipped. That is why a missing secret must be checked before a
-  release, not after.
+  release, not after. `scripts/release.sh` performs that same check itself
+  before it creates any tag, so a missing credential can never leave a
+  half-released repo behind.
   ```bash
   gh secret set CREDENTIAL_JSON --repo arrrrny/graphql_plus < credential.json
   ```
