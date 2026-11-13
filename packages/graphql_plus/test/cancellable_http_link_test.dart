@@ -375,29 +375,36 @@ void main() {
       fastServer.listen((request) async {
         requestCount++;
         final currentRequest = requestCount;
-        // First request is slow, others are fast
-        if (currentRequest == 1) {
-          // Signal that the request has actually reached the server, so the test
-          // never has to guess when it is in flight.
-          if (!firstRequestInFlight.isCompleted)
-            firstRequestInFlight.complete();
+        // The request document is the only unambiguous handle on *which* query
+        // this is: both queries go out through the same client, so the server's
+        // arrival order is likely FIFO but not guaranteed to be. Signalling on
+        // "the first request the server saw" would still race Q1's abort-trigger
+        // wiring whenever Q2 landed first.
+        final body = await utf8.decodeStream(request);
+
+        if (body.contains('query Q1')) {
+          // Release the test the moment Q1 is actually in flight — cancelling
+          // before that was the flake this test used to guess at with a delay.
+          firstRequestInFlight.complete();
+          // Hold the response so the cancel lands while Q1 is still pending.
           await Future<void>.delayed(Duration(seconds: 3));
         }
+
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType.json;
         request.response.write('{"data": {"request": "$currentRequest"}}');
         await request.response.close();
       });
 
+      final link = CancellableHttpLink(fastServerUrl);
+      final client = GraphQLClient(
+        cache: GraphQLCache(),
+        link: link,
+      );
+
+      final token1 = CancellationToken();
+
       try {
-        final link = CancellableHttpLink(fastServerUrl);
-        final client = GraphQLClient(
-          cache: GraphQLCache(),
-          link: link,
-        );
-
-        final token1 = CancellationToken();
-
         // Start first (slow) request
         final future1 = client.query(
           QueryOptions(
@@ -415,9 +422,7 @@ void main() {
           ),
         );
 
-        // Cancel once the server has the request. A fixed delay here was the flake:
-        // under full-suite load the request could still be in setup, and cancelling
-        // then raced the link's abort-trigger wiring.
+        // Cancel once Q1 is in flight.
         await firstRequestInFlight.future.timeout(const Duration(seconds: 10));
         token1.cancel();
 
@@ -445,10 +450,11 @@ void main() {
           }
         }
         expect(result1.hasException, isTrue);
-
+      } finally {
+        // Disposal belongs here, not on the happy path: a throw from the timeout
+        // above would otherwise skip it and leak the client's HttpClient.
         token1.dispose();
         await link.dispose();
-      } finally {
         await fastServer.close(force: true);
       }
     });
