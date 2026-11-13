@@ -1,3 +1,15 @@
+# v5.4.0
+
+## Changed
+- Dependency on `graphql_plus` raised to `^5.3.0` (was `^5.2.6`) — a narrower range that
+  requires at least 5.3.0 — picking up the four 5.x
+  hardening fixes: a partial `optimisticResult` no longer blanks cache fields it omits, optimistic
+  writes are actually merged, `WebSocketLink.connectionState`, `AuthLink.onAuthError`
+  refresh-and-replay, and the subscription keepalive watchdog no longer force-closes a peer that
+  sends no protocol keepalives.
+- No widget-layer API change: this release is a re-point at the hardened client, so existing
+  `graphql_flutter_plus` usage is unchanged.
+
 # v5.3.2
 
 ## Fixed
