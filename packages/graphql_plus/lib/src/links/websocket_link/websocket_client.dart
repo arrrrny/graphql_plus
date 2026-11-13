@@ -270,6 +270,14 @@ class SocketClient {
   Timer? _reconnectTimer;
   Timer? _pingTimer;
 
+  /// Deadline for the next `pong` from a `graphql-transport-ws` peer.
+  ///
+  /// Armed every time a ping is written and cancelled when the matching `pong`
+  /// arrives. If it fires, the peer has not answered within
+  /// [SocketClientConfig.inactivityTimeout] and the connection is treated as
+  /// dead (half-open TCP), so the socket is closed.
+  Timer? _pongDeadline;
+
   @visibleForTesting
   GraphQLWebSocketChannel? socketChannel;
 
@@ -391,9 +399,6 @@ class SocketClient {
         if (protocol == GraphQLProtocol.graphqlWs) {
           _disconnectOnKeepAliveTimeout(_messages);
         }
-        if (protocol == GraphQLProtocol.graphqlTransportWs) {
-          _enqueuePing();
-        }
       }
 
       _messageSubscription = _messages.listen(
@@ -406,10 +411,15 @@ class SocketClient {
               message.type == 'ping') {
             _write(PongMessage());
           }
-          // A `pong` needs no handling: the keepalive is a [Timer.periodic] that
-          // fires on the configured interval whatever the peer answers, so a
-          // chatty or unsolicited `pong` must not re-arm it and move the cadence
-          // onto the last `pong` instead of the last ping.
+          // A `pong` from the peer proves the connection is alive: cancel the
+          // deadline armed by the last ping. The ping cadence itself is a
+          // [Timer.periodic] measured from the connection, so an unsolicited or
+          // chatty `pong` cannot move it.
+          if (protocol == GraphQLProtocol.graphqlTransportWs &&
+              message.type == 'pong') {
+            _pongDeadline?.cancel();
+            _pongDeadline = null;
+          }
         },
         onDone: onConnectionLost,
         // onDone will not be triggered if the subscription is
@@ -417,6 +427,14 @@ class SocketClient {
         cancelOnError: false,
         onError: onStreamError,
       );
+
+      // The ping keepalive is armed only after the message subscription is in
+      // place, so an early `pong` (or a fast server) is always seen by the
+      // deadline handler above.
+      if (config.inactivityTimeout != null &&
+          protocol == GraphQLProtocol.graphqlTransportWs) {
+        _enqueuePing();
+      }
 
       if (_connectionWasLost) {
         for (final s in _subscriptionInitializers.values) {
@@ -442,6 +460,8 @@ class SocketClient {
     print('Disconnected from websocket.');
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
+    _pongDeadline?.cancel();
+    _pongDeadline = null;
     _keepAliveSubscription?.cancel();
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
@@ -475,12 +495,19 @@ class SocketClient {
     );
   }
 
-  /// Sends a keepalive ping every [SocketClientConfig.inactivityTimeout].
+  /// Sends a keepalive ping every [SocketClientConfig.inactivityTimeout] and
+  /// arms a pong deadline for each ping.
   ///
   /// Periodic on purpose: a one-shot timer that is only re-armed when a `pong` arrives
   /// gives up after the first ping if the peer does not answer, leaving the connection
   /// with no keepalive at all. A peer that never answers pings is exactly the case a
   /// keepalive exists to survive, so the ping must not depend on being acknowledged.
+  ///
+  /// Every ping also arms [_pongDeadline]; if the peer does not answer within
+  /// [SocketClientConfig.inactivityTimeout] the connection is closed as dead. This
+  /// is what detects a half-open TCP connection (peer vanished without a FIN/RST),
+  /// which the keepalive ping alone cannot: pings would otherwise be written
+  /// forever into a dead socket. See issue #35.
   ///
   /// Called once per connection, from [connectOrReconnect]: the interval is measured from
   /// the connection, not from the last `pong`, so a peer that answers — or chatters —
@@ -490,7 +517,29 @@ class SocketClient {
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(
       config.inactivityTimeout!,
-      (_) => _write(PingMessage(config.pingMessage)),
+      (_) {
+        // Do not ping a connection that is already tearing down: the socket may
+        // be closed and `_write` would NPE on a null channel.
+        if (_connectionStateController.value ==
+                SocketConnectionState.notConnected ||
+            _connectionStateController.isClosed) {
+          return;
+        }
+        _write(PingMessage(config.pingMessage));
+        // Arm the pong deadline: if the peer has not answered by the time this
+        // fires, the connection is treated as dead (half-open TCP) and closed.
+        // Cancel first: a long-lived connection re-arms this on every ping, and
+        // without the cancel the previous deadline would still be pending.
+        // The deadline is measured from the last ping, so it must be strictly
+        // less than the ping interval; otherwise the next ping tick would cancel
+        // this deadline before it can fire. `inactivityTimeout` is the same
+        // value as the ping interval, so use half of it.
+        _pongDeadline?.cancel();
+        _pongDeadline = Timer(
+          config.inactivityTimeout! ~/ 2,
+          () => unawaited(_closeSocketChannel()),
+        );
+      },
     );
   }
 
@@ -507,6 +556,8 @@ class SocketClient {
     print('Disposing socket client..');
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
+    _pongDeadline?.cancel();
+    _pongDeadline = null;
     _keepAliveSubscription?.cancel();
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
