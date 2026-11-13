@@ -30,6 +30,17 @@
     original, so a trace header or similar survives the refresh.
 
 ## Fixed
+- **A `graphql-transport-ws` peer that never answers `ping` keeps its keepalive** (closes the
+  review findings on #29). `_enqueuePing` armed a one-shot `Timer` that was only re-armed when
+  a `pong` arrived, so a peer that never answered received exactly one ping and then nothing —
+  the connection had no keepalive at all, which is precisely the case a keepalive exists for.
+  The timer is now `Timer.periodic`, so pings repeat on `inactivityTimeout` regardless of
+  acknowledgements, and the `pong` handler no longer re-arms it: with a periodic timer that
+  re-arm measured the interval from the last `pong`, so a peer sending unsolicited or chatty
+  `pong`s reset the timer faster than it could fire and the ping never went out.
+  - Scope: this covers the client side only. A `graphql-transport-ws` peer that goes silent
+    after the last `pong` is still not detected as dead — unlike `graphql-ws`, which arms
+    `_disconnectOnKeepAliveTimeout` — and that pre-existing gap is tracked in #35.
 - **`WebSocketLink` no longer crashes, leaks a socket, or double-reports `notConnected` after a
   rebuild** (closes the review findings on #24). Three defects in the `connectionState` forwarder
   that #24 introduced:

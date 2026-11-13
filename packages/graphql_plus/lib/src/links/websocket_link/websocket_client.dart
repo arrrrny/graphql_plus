@@ -402,13 +402,14 @@ class SocketClient {
             onMessage!(message);
           }
 
-          if (protocol == GraphQLProtocol.graphqlTransportWs) {
-            if (message.type == 'ping') {
-              _write(PongMessage());
-            } else if (message.type == 'pong') {
-              _enqueuePing();
-            }
+          if (protocol == GraphQLProtocol.graphqlTransportWs &&
+              message.type == 'ping') {
+            _write(PongMessage());
           }
+          // A `pong` needs no handling: the keepalive is a [Timer.periodic] that
+          // fires on the configured interval whatever the peer answers, so a
+          // chatty or unsolicited `pong` must not re-arm it and move the cadence
+          // onto the last `pong` instead of the last ping.
         },
         onDone: onConnectionLost,
         // onDone will not be triggered if the subscription is
@@ -480,6 +481,11 @@ class SocketClient {
   /// gives up after the first ping if the peer does not answer, leaving the connection
   /// with no keepalive at all. A peer that never answers pings is exactly the case a
   /// keepalive exists to survive, so the ping must not depend on being acknowledged.
+  ///
+  /// Called once per connection, from [connectOrReconnect]: the interval is measured from
+  /// the connection, not from the last `pong`, so a peer that answers — or chatters —
+  /// cannot move it. Re-arming is therefore not needed on `pong`, and the cancel above only
+  /// guards against a second call on the same connection.
   void _enqueuePing() {
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(

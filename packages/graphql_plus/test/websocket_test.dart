@@ -55,6 +55,23 @@ Future<void> waitForCondition(
   }
 }
 
+/// Binds a throwaway WebSocket server on an ephemeral port, tearing it down with the
+/// test, and hands every inbound message to [onMessage] with the socket that received it.
+///
+/// Shared by the keepalive and keepalive-watchdog groups: both need the same bare
+/// `WebSocketTransformer.upgrade` server, and two copies of the bootstrap drift.
+Future<HttpServer> startServer({
+  required void Function(WebSocket socket, dynamic data) onMessage,
+}) async {
+  final server = await HttpServer.bind('127.0.0.1', 0);
+  addTearDown(() => server.close(force: true));
+  server.listen((HttpRequest request) async {
+    final socket = await WebSocketTransformer.upgrade(request);
+    socket.listen((data) => onMessage(socket, data));
+  });
+  return server;
+}
+
 Future<void> main() async {
   String wsUrl = await runWebSocketServer();
   group('InitOperation', () {
@@ -1120,12 +1137,8 @@ Future<void> main() async {
   group('SocketClient graphql-transport-ws keepalive', () {
     test('keeps pinging a peer that never answers with pong', () async {
       var pings = 0;
-      final server = await HttpServer.bind('127.0.0.1', 0);
-      addTearDown(() => server.close(force: true));
-
-      server.listen((HttpRequest request) async {
-        final socket = await WebSocketTransformer.upgrade(request);
-        socket.listen((data) {
+      final server = await startServer(
+        onMessage: (socket, data) {
           final message = json.decode(data.toString());
           switch (message['type']) {
             case 'connection_init':
@@ -1136,8 +1149,8 @@ Future<void> main() async {
               pings++;
               break;
           }
-        });
-      });
+        },
+      );
 
       final client = SocketClient(
         'ws://127.0.0.1:${server.port}',
@@ -1153,29 +1166,67 @@ Future<void> main() async {
           .where((state) => state == SocketConnectionState.connected)
           .first;
 
-      // Several ping intervals, with no pong ever sent. Before the fix the timer
-      // was one-shot, so exactly one ping was sent and the connection then had no
-      // keepalive at all.
-      await Future<void>.delayed(const Duration(milliseconds: 750));
-
-      expect(pings, greaterThan(1),
+      // No `pong` is ever sent, so the count has to keep climbing on the interval
+      // alone. Waiting for a third ping rather than sleeping and asserting
+      // `greaterThan(1)`: two pings and then a dead timer would satisfy that, and a
+      // fixed wall-clock wait is load-sensitive on a busy runner.
+      await waitForCondition(
+        () => pings >= 3,
+        message: 'the keepalive to fire three times unacknowledged',
+      );
+      expect(pings, greaterThanOrEqualTo(3),
           reason: 'a keepalive must not depend on being acknowledged');
+    });
+
+    test('keeps pinging a peer that chatters unsolicited pongs', () async {
+      var pings = 0;
+      final server = await startServer(
+        onMessage: (socket, data) {
+          final message = json.decode(data.toString());
+          switch (message['type']) {
+            case 'connection_init':
+              socket.add(json.encode({'type': 'connection_ack'}));
+              // Chat back `pong` on a cadence far faster than the ping interval,
+              // without ever being asked: a proxy or an over-eager peer.
+              Timer.periodic(
+                const Duration(milliseconds: 20),
+                (_) => socket.add(json.encode({'type': 'pong'})),
+              );
+              break;
+            case 'ping':
+              pings++;
+              break;
+          }
+        },
+      );
+
+      final client = SocketClient(
+        'ws://127.0.0.1:${server.port}',
+        protocol: GraphQLProtocol.graphqlTransportWs,
+        config: SocketClientConfig(
+          autoReconnect: false,
+          inactivityTimeout: const Duration(milliseconds: 200),
+        ),
+      );
+      addTearDown(client.dispose);
+
+      await client.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
+
+      // The interval belongs to the connection, not to the last `pong`: a peer that
+      // answers (or chatters) must not be able to starve the ping by re-arming the
+      // timer on every `pong`.
+      await waitForCondition(
+        () => pings >= 3,
+        message: 'the keepalive to fire three times despite the pong chatter',
+      );
+      expect(pings, greaterThanOrEqualTo(3),
+          reason: 'a chatty peer must not be able to starve the keepalive');
     });
   });
 
   group('SocketClient keepalive watchdog', () {
-    Future<HttpServer> startServer({
-      required void Function(WebSocket socket, dynamic data) onMessage,
-    }) async {
-      final server = await HttpServer.bind('127.0.0.1', 0);
-      addTearDown(() => server.close(force: true));
-      server.listen((HttpRequest request) async {
-        final socket = await WebSocketTransformer.upgrade(request);
-        socket.listen((data) => onMessage(socket, data));
-      });
-      return server;
-    }
-
     test(
       'graphql-ws: a peer that never sends ConnectionKeepAlive is left connected',
       () async {
