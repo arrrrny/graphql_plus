@@ -30,6 +30,20 @@
     original, so a trace header or similar survives the refresh.
 
 ## Fixed
+- **`WebSocketLink` no longer crashes, leaks a socket, or double-reports `notConnected` after a
+  rebuild** (closes the review findings on #24). Three defects in the `connectionState` forwarder
+  that #24 introduced:
+  - A `request()` or `connectOrReconnect()` on a **disposed** link threw an uncaught async
+    `Bad state: Cannot add new events after calling close` from inside the socket's stream
+    delivery, where no caller could catch it. The link now refuses the rebuild with a
+    `StateError` at the call site, and the forwarder ignores a closed subject.
+  - `dispose()` cleared its fields **after** awaiting the socket teardown, so a
+    `connectOrReconnect()` landing in that window installed a client that `dispose()` then
+    nulled without ever closing — a live socket nobody owned. The fields are captured and
+    cleared before the first `await`, and a disposed link rejects a reconnect outright.
+  - Every fresh connect emitted `notConnected` **twice**: the link seeds its own subject with it
+    and the new `SocketClient`'s `BehaviorSubject` replays its seed to a late listener. The
+    replayed seed is now dropped, so a consumer counting transitions sees one event per connect.
 - **A partial `optimisticResult` no longer blanks cache fields it omits** (closes #3,
   upstream graphql-flutter#1118). `normalize` emits an explicit `null` for every selected
   field that an optimistic payload left out; those nulls were recorded into the optimistic
