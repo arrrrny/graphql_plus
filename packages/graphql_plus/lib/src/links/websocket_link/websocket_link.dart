@@ -29,6 +29,13 @@ class WebSocketLink extends Link {
   // cannot be final because we're changing the instance upon a header change.
   SocketClient? _socketClient;
 
+  /// Set synchronously by [dispose], before its first `await`.
+  ///
+  /// [dispose] hands the socket teardown to the event loop, and [connectOrReconnect] is
+  /// public API, so a caller can interleave the two. Without this flag the rebuild installs a
+  /// client that [dispose] then nulls without closing — a live socket nobody owns.
+  bool _isDisposed = false;
+
   /// Stable connection state for this link, surviving [connectOrReconnect].
   ///
   /// [SocketClient] is disposed and rebuilt on every reconnect, so subscribing to
@@ -59,7 +66,15 @@ class WebSocketLink extends Link {
   }
 
   /// Connects or reconnects to the server with the specified headers.
+  ///
+  /// Throws a [StateError] if this link has been disposed — a disposed link has no
+  /// [connectionState] subject left to forward into, so rebuilding here would surface as an
+  /// uncaught async `Bad state` from inside the socket's stream delivery instead of at the call
+  /// site. Create a new [WebSocketLink] instead.
   void connectOrReconnect() {
+    if (_isDisposed) {
+      throw StateError('WebSocketLink is disposed; create a new link');
+    }
     _socketClient?.dispose();
     _connectionStateSubscription?.cancel();
     _socketClient = SocketClient(
@@ -67,8 +82,17 @@ class WebSocketLink extends Link {
       config: config,
       protocol: subProtocol,
     );
-    _connectionStateSubscription =
-        _socketClient!.connectionState.listen(_connectionState.add);
+    _connectionStateSubscription = _socketClient!.connectionState
+        // The socket client's stream is a BehaviorSubject, so a listener attached after
+        // construction gets the current value replayed to it. This link already seeds its own
+        // subject with notConnected, so forwarding that replay would emit notConnected twice
+        // per connect; drop the replay and forward every transition after it.
+        .skip(1)
+        .listen((state) {
+      if (!_connectionState.isClosed) {
+        _connectionState.add(state);
+      }
+    });
   }
 
   SocketClient? get getSocketClient => _socketClient;
@@ -76,10 +100,16 @@ class WebSocketLink extends Link {
   /// Disposes the underlying socket client explicitly. Only use this, if you want to disconnect from
   /// the current server in favour of another one. If that's the case, create a new [WebSocketLink] instance.
   Future<void> dispose() async {
-    await _socketClient?.dispose();
+    _isDisposed = true;
+    // Capture and clear before awaiting: a [connectOrReconnect] landing in this window must
+    // find no client to replace and no forwarder to cancel, or dispose would null a freshly
+    // installed client without ever closing it.
+    final client = _socketClient;
+    final forwarding = _connectionStateSubscription;
     _socketClient = null;
-    await _connectionStateSubscription?.cancel();
     _connectionStateSubscription = null;
+    await client?.dispose();
+    await forwarding?.cancel();
     if (!_connectionState.isClosed) {
       await _connectionState.close();
     }

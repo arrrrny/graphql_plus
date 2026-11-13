@@ -1404,7 +1404,14 @@ Future<void> main() async {
           .first;
 
       final countBeforeRebuild = seen.length;
+      // `connectionState` is a BehaviorSubject, so a new listener is handed the current
+      // value: awaiting `connected` again returns before the rebuild has emitted anything.
+      // The rebuild's own `connecting` is the event only it can produce.
+      final rebuilt = link.connectionState
+          .where((state) => state == SocketConnectionState.connecting)
+          .first;
       link.connectOrReconnect();
+      await rebuilt;
       await link.connectionState
           .where((state) => state == SocketConnectionState.connected)
           .first;
@@ -1412,7 +1419,73 @@ Future<void> main() async {
       expect(seen.length, greaterThan(countBeforeRebuild),
           reason:
               'the original subscription must keep receiving after a rebuild');
+
+      // The replaced client tears down asynchronously and passes through `notConnected`.
+      // An uncancelled forwarder would report that as this link dropping the very
+      // connection it just rebuilt.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(
+        seen.skip(countBeforeRebuild),
+        isNot(contains(SocketConnectionState.notConnected)),
+        reason: 'the replaced client is disposed, not disconnected',
+      );
       await subscription.cancel();
+    });
+
+    test('emits notConnected exactly once per connect', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink(
+        'ws://127.0.0.1:${harness.server.port}',
+        config: const SocketClientConfig(autoReconnect: false),
+      );
+      addTearDown(link.dispose);
+
+      final seen = <SocketConnectionState>[];
+      final subscription = link.connectionState.listen(seen.add);
+
+      link.connectOrReconnect();
+      await link.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(
+        seen.where((state) => state == SocketConnectionState.notConnected),
+        hasLength(1),
+        reason: 'the link seed and the replayed socket seed are one event',
+      );
+      await subscription.cancel();
+    });
+
+    test('a disposed link refuses a reconnect instead of crashing', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink('ws://127.0.0.1:${harness.server.port}');
+      await link.dispose();
+
+      // The unguarded rebuild connected fine and then threw an uncaught
+      // `Bad state: Cannot add new events after calling close` from inside the
+      // socket's stream delivery — an async error no caller could catch.
+      expect(() => link.connectOrReconnect(), throwsStateError);
+      expect(link.getSocketClient, isNull);
+    });
+
+    test('a request on a disposed link errors rather than crashing', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink(
+        'ws://127.0.0.1:${harness.server.port}',
+        config: const SocketClientConfig(autoReconnect: false),
+      );
+      await link.dispose();
+
+      await expectLater(
+        link.request(
+          Request(
+              operation: Operation(document: parseString('subscription {}'))),
+        ),
+        emitsError(isA<StateError>()),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(harness.sockets, isEmpty);
     });
 
     test('closes after dispose', () async {
