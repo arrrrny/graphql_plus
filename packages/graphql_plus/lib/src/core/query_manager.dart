@@ -200,15 +200,30 @@ class QueryManager {
 
   Future<QueryResult<TParsed>> mutate<TParsed>(
       MutationOptions<TParsed> options) async {
-    final result = await fetchQuery(_oneOffOpId, options);
-    // once the mutation has been process successfully, execute callbacks
-    // before returning the results
     final mutationCallbacks = MutationCallbackHandler<TParsed>(
       cache: cache,
       options: options,
       queryId: _oneOffOpId,
     );
 
+    // Resolve eagerly first: with an [MutationOptions.optimisticResult] this
+    // records the optimistic patch for `_oneOffOpId` in the cache, which is
+    // the parent of the patch the optimistic `update` pass writes into.
+    final MultiSourceResult<TParsed> allResults =
+        fetchQueryAsMultiSourceResult(_oneOffOpId, options);
+
+    // Optimistic pass — the same contract the `Mutation` widget gets from its
+    // ObservableQuery: `update` is invoked with the optimistic result before it
+    // is invoked with the network result. A one-off operation has no
+    // ObservableQuery to emit through, so this is the only place it can run.
+    final QueryResult<TParsed> eagerResult = allResults.eagerResult;
+    if (eagerResult.isOptimistic) {
+      await mutationCallbacks.update?.call(eagerResult);
+    }
+
+    final result = await (allResults.networkResult ?? eagerResult);
+    // once the mutation has been process successfully, execute callbacks
+    // before returning the results
     final callbacks = mutationCallbacks.callbacks;
 
     for (final callback in callbacks) {
