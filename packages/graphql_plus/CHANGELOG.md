@@ -1,6 +1,24 @@
 # v5.3.0
 
 ## Added
+- **`IsolateStore`** — a `Store` that encodes and persists on a background isolate (closes #9,
+  upstream graphql-flutter#424). `HiveStore` encodes every entry and writes it to disk on the
+  caller's isolate, so persisting a large cache is CPU work the UI thread pays for. `IsolateStore`
+  keeps a hot in-memory mirror for reads — the synchronous `Store` contract leaves no room for an
+  async read — and hands every `put`/`putAll`/`delete`/`reset` to a worker isolate, which applies
+  it to the real box off the UI thread. `flush()` is the durability await point; `close()` flushes,
+  shuts the worker down and closes its box.
+  - `IsolateStore.hive({required boxName, path})` owns the box on the worker — do not open the
+    same box name on the calling isolate. `IsolateStore.memory()` is the same plumbing without a
+    disk, for tests and benchmarks.
+  - Additive: no existing signature, default, or export changes. The client and cache API is
+    untouched — this is an ordinary `Store`, so it drops into `GraphQLCache` wherever a
+    `HiveStore` would.
+  - The mirror is the price of the synchronous contract: the normalized graph is held on the UI
+    isolate as well as on the worker, and the caller still pays a copy of what it writes. What
+    moves off-isolate is the encode plus the write.
+  - Not portable to the web: `dart:isolate` does not exist there, so the web build throws
+    `UnsupportedError` rather than silently degrading to a UI-thread store.
 - **`WebSocketLink.connectionState`** — a stable `Stream<SocketConnectionState>` on the link, so
   an app can tell that a subscription's connection dropped without reaching into `SocketClient`
   (closes #6, upstream graphql-flutter#1188). `SocketClient` is disposed and rebuilt on every
