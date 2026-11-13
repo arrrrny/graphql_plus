@@ -158,14 +158,49 @@ fi
 
 step "Validate both packages (pub publish --dry-run)"
 
-if [ "$DRY_RUN" = 1 ]; then
-  echo "development environment: nothing is tagged, released or published."
-fi
-
 require dart
 require flutter
+
+# The client has no local dependency, so it validates exactly as it will publish.
 (cd "$CLIENT_DIR" && dart pub publish --dry-run)
-(cd "$FLUTTER_DIR" && flutter pub publish --dry-run)
+
+# graphql_flutter_plus declares `graphql_plus: ^<client version>`, and pub.dev
+# refuses a constraint naming a version it has never served — so before the
+# client is live the honest validation of the flutter package is against the
+# LOCAL client, in a throwaway copy that carries a path override. Never in the
+# tree itself: a published pubspec must not carry an override, and the real,
+# registry-resolved validation happens after the client is live (below).
+validate_flutter_locally() {
+  local scratch client_abs
+  client_abs="$(cd "$CLIENT_DIR" && pwd)"
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/graphql-plus-flutter-validate.XXXXXX")"
+  # Copy the source, not the machine-local state: pubspec_overrides.yaml (melos,
+  # gitignored) carries a `../graphql_plus` path that exists only inside the
+  # monorepo, and .dart_tool/pubspec.lock/build would resolve against the old
+  # package_config. The override is rewritten with an ABSOLUTE path so the copy
+  # stands on its own.
+  (cd "$FLUTTER_DIR" && tar --exclude=./.dart_tool --exclude=./build \
+    --exclude=./pubspec.lock --exclude=./pubspec_overrides.yaml -cf - .) |
+    (cd "$scratch" && tar -xf -) || return 1
+  cat >"$scratch/pubspec_overrides.yaml" <<EOF
+# throwaway: validate against the local client before the client is on pub.dev
+dependency_overrides:
+  $CLIENT_NAME:
+    path: $client_abs
+EOF
+  if (cd "$scratch" && flutter pub publish --dry-run --ignore-warnings); then
+    rm -rf "$scratch"
+    return 0
+  fi
+  rm -rf "$scratch"
+  return 1
+}
+
+if validate_flutter_locally; then
+  echo "$FLUTTER_NAME validates against the local $CLIENT_NAME (registry-resolved validation follows once the client is live)"
+else
+  die "$FLUTTER_NAME does not validate against the local $CLIENT_NAME — fix that before releasing"
+fi
 
 [ "$DRY_RUN" = 1 ] && {
   step "Dry run complete"
@@ -181,8 +216,29 @@ has_pub_dev_token() {
   dart pub token list 2>/dev/null | grep -q '^https://pub\.dev$'
 }
 
+# The workflows publish with the CREDENTIAL_JSON repository secret. Any OTHER
+# secret in the list does not authenticate a publish, so a check that only asks
+# "does the repo have secrets at all?" answers yes for a repo that cannot
+# publish — which is the inversion this guard was written to prevent.
+#
+# Prints: yes | no | unknown (unknown = the secrets API was unreadable, e.g. the
+# caller lacks admin on the repo — that is not the same as "absent").
+repo_publish_secret_state() {
+  local count
+  if ! count="$(gh api "repos/arrrrny/graphql_plus/actions/secrets" \
+    --jq '[.secrets[] | select(.name == "CREDENTIAL_JSON")] | length' 2>/dev/null)"; then
+    echo unknown
+    return 0
+  fi
+  case "${count:-}" in
+    '' | *[!0-9]*) echo unknown ;;
+    0) echo no ;;
+    *) echo yes ;;
+  esac
+}
+
 if [ "$LOCAL" = 1 ]; then
-  if [ -z "${PUB_CREDENTIALS_JSON:-}${CREDENTIAL_JSON:-}" ] && ! has_pub_dev_token; then
+  if [ -z "${PUB_CREDENTIALS_JSON:-${CREDENTIAL_JSON:-}}" ] && ! has_pub_dev_token; then
     die "no pub.dev credential on this machine.
   Add one, then re-run with --local:
     dart pub token add https://pub.dev          # paste a token from
@@ -190,17 +246,26 @@ if [ "$LOCAL" = 1 ]; then
   (or export PUB_CREDENTIALS_JSON with the pub site's JSON credential)"
   fi
 else
-  # The workflows read the repo secret, not this shell. A missing secret is not
-  # fatal here — the tag and release are still worth creating — but it must not
-  # be discovered after the fact, so say it now and keep going only with --yes.
-  if ! gh api "repos/arrrrny/graphql_plus/actions/secrets" --jq '.secrets | length' 2>/dev/null | grep -qv '^0$'; then
-    echo "WARNING: the repository has no actions secrets, so the release workflows"
-    echo "         will FAIL the release run (CREDENTIAL_JSON is absent — the shared"
-    echo "         check-publish-creds action errors on a real release event)."
-    echo "         Add the secret: gh secret set CREDENTIAL_JSON --repo arrrrny/graphql_plus"
-    echo "         or run this script with --local and a local pub.dev token."
-    [ "$ASSUME_YES" = 1 ] || die "re-run with --yes to tag and release anyway, or add the credential first"
-  fi
+  # A missing credential is fatal BEFORE anything is tagged: a run that tags and
+  # releases first leaves a half-state behind (tags and releases with nothing
+  # published), which a re-run then has to reason about. `--yes` does not
+  # override it — it only skips the interactive prompt.
+  secret_state="$(repo_publish_secret_state)"
+  case "$secret_state" in
+    yes) ;;
+    no)
+      die "the repository has no CREDENTIAL_JSON secret, so the release workflows
+  cannot publish — refusing to tag a release nothing would ship.
+  Add the credential:  gh secret set CREDENTIAL_JSON --repo arrrrny/graphql_plus < credential.json
+  or publish from this machine:  ./scripts/release.sh $ENVIRONMENT --local"
+      ;;
+    *)
+      echo "WARNING: could not read the repository's secrets (gh needs admin on"
+      echo "         arrrrny/graphql_plus), so the CREDENTIAL_JSON check is unknown."
+      echo "         The release workflows will FAIL the release run if it is absent."
+      [ "$ASSUME_YES" = 1 ] || die "re-run with --yes to tag and release with an unverified credential, or add it first"
+      ;;
+  esac
 fi
 
 # ------------------------------------------------------------ tag and release
@@ -251,6 +316,12 @@ if [ "$LOCAL" = 0 ]; then
   done
   echo "$CLIENT_NAME $CLIENT_VERSION is live"
 
+  # Now that the client is on pub.dev, the flutter package can be validated for
+  # real — against the registry constraint it will actually publish under, not
+  # the local override the preflight used.
+  step "Validate $FLUTTER_NAME against the live $CLIENT_NAME"
+  (cd "$FLUTTER_DIR" && flutter pub publish --dry-run)
+
   notes="$(mktemp -t graphql-plus-notes)"
   changelog_notes "$FLUTTER_DIR/CHANGELOG.md" "$FLUTTER_VERSION" >"$notes"
   if git rev-parse -q --verify "refs/tags/$FLUTTER_TAG" >/dev/null; then
@@ -279,6 +350,7 @@ else
       die "$CLIENT_NAME $CLIENT_VERSION did not appear on pub.dev within ${PUBLISH_WAIT_SECONDS}s"
     sleep 10
   done
+  (cd "$FLUTTER_DIR" && flutter pub publish --dry-run)
   (cd "$FLUTTER_DIR" && flutter pub publish --force)
 fi
 
