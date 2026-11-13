@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:gql_exec/gql_exec.dart';
 import 'package:gql_link/gql_link.dart';
+import 'package:rxdart/rxdart.dart';
 
 import './websocket_client.dart';
 
@@ -26,6 +29,26 @@ class WebSocketLink extends Link {
   // cannot be final because we're changing the instance upon a header change.
   SocketClient? _socketClient;
 
+  /// Stable connection state for this link, surviving [connectOrReconnect].
+  ///
+  /// [SocketClient] is disposed and rebuilt on every reconnect, so subscribing to
+  /// `getSocketClient.connectionState` binds a caller to an instance that is about to
+  /// be thrown away. This subject is owned by the link and keeps forwarding across
+  /// rebuilds, so a listener that needs to know the subscription dropped can rely on it.
+  final BehaviorSubject<SocketConnectionState> _connectionState =
+      BehaviorSubject<SocketConnectionState>.seeded(
+    SocketConnectionState.notConnected,
+  );
+
+  StreamSubscription<SocketConnectionState>? _connectionStateSubscription;
+
+  /// The current connection state of the underlying socket.
+  ///
+  /// Emits [SocketConnectionState.notConnected] before the first connection, then every
+  /// transition — including `connecting` / `connected` after a reconnect — on the same
+  /// stream. Callers do not need a [SocketClient] reference to observe a lost connection.
+  Stream<SocketConnectionState> get connectionState => _connectionState.stream;
+
   @override
   Stream<Response> request(Request request, [forward]) async* {
     if (_socketClient == null) {
@@ -38,11 +61,14 @@ class WebSocketLink extends Link {
   /// Connects or reconnects to the server with the specified headers.
   void connectOrReconnect() {
     _socketClient?.dispose();
+    _connectionStateSubscription?.cancel();
     _socketClient = SocketClient(
       url,
       config: config,
       protocol: subProtocol,
     );
+    _connectionStateSubscription =
+        _socketClient!.connectionState.listen(_connectionState.add);
   }
 
   SocketClient? get getSocketClient => _socketClient;
@@ -52,5 +78,10 @@ class WebSocketLink extends Link {
   Future<void> dispose() async {
     await _socketClient?.dispose();
     _socketClient = null;
+    await _connectionStateSubscription?.cancel();
+    _connectionStateSubscription = null;
+    if (!_connectionState.isClosed) {
+      await _connectionState.close();
+    }
   }
 }
