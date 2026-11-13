@@ -11,7 +11,20 @@ jobs:
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v4
+      - name: 'Check publish credentials'
+        id: creds
+        run: |
+          if [ -z "${CREDENTIAL_JSON:-}" ]; then
+            echo "::notice::CREDENTIAL_JSON is not configured; skipping publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          CREDENTIAL_JSON: ${{ secrets.CREDENTIAL_JSON }}
+
       - name: 'graphql_plus publish to Pub.dev'
+        if: steps.creds.outputs.skip == 'false'
         uses: k-paxian/dart-package-publisher@master
         with:
           credentialJson: ${{ secrets.CREDENTIAL_JSON }}
@@ -31,7 +44,19 @@ jobs:
         # in dry mode because the new release is not on the pub.dev
         # yet
         # TODO: we need to have some bump function for dart in the changelog.dat tool.
+      - name: 'Check publish credentials'
+        id: creds
+        run: |
+          if [ -z "${CREDENTIAL_JSON:-}" ]; then
+            echo "::notice::CREDENTIAL_JSON is not configured; skipping publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          CREDENTIAL_JSON: ${{ secrets.CREDENTIAL_JSON }}
       - name: 'graphql_flutter_plus publish to Pub.dev'
+        if: steps.creds.outputs.skip == 'false'
         uses: k-paxian/dart-package-publisher@master
         with:
           credentialJson: ${{ secrets.CREDENTIAL_JSON }}
