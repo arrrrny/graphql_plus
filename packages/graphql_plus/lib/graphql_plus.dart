@@ -9,5 +9,7 @@ export 'package:graphql_plus/src/graphql_client.dart';
 
 export 'package:graphql_plus/src/links/links.dart';
 
+export 'package:graphql_plus/src/offline/offline.dart';
+
 export 'package:graphql_plus/src/utilities/helpers.dart'
     show gql, optimizedDeepEquals;

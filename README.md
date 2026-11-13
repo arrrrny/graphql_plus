@@ -67,6 +67,7 @@ Around `graphql_flutter` are builds awesome tools like:
 ✅ &nbsp; [Modularity](./packages/graphql_plus/README.md#links)  
 ✅ &nbsp; [Client-state management](./packages/graphql_plus/README.md#direct-cache-access-api)  
 ✅ &nbsp; [Operation cancellation](./packages/graphql_plus/README.md#cancellation)  
+✅ &nbsp; [Offline mutation queue](./packages/graphql_plus/README.md#offline-mutations)  
 ⚠️  &nbsp; [Automatic Persisted Queries](./packages/graphql_plus/README.md#persistedquerieslink-experimental-warning-out-of-service-warning) (out of service)  
 
 ## Contributing

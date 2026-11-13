@@ -1041,6 +1041,48 @@ When combining links, **it is important to note that**:
 - Terminating links like `HttpLink` and `WebSocketLink` must come at the end of a route, and will not call links following them.
 - Link order is very important. In `HttpLink(myEndpoint).concat(AuthLink(getToken: authenticate))`, the `AuthLink` will never be called.
 
+### Offline mutations
+
+`OfflineMutationLink` queues the mutations a client makes without connectivity
+and replays them, in the order they were made, once the network is back. It
+wraps the link that does the sending, so it works with any terminating link.
+
+```dart
+final queue = OfflineMutationQueue(store: myDurableStore);
+final link = OfflineMutationLink(
+  forward: HttpLink(uri: myEndpoint),
+  connectivity: myConnectivityMonitor,
+  queue: queue,
+);
+link.onDelivered.listen((delivery) {
+  // the server answered this queued mutation
+  print(delivery.response.data);
+});
+final client = GraphQLClient(link: link, cache: cache);
+```
+
+- A `ConnectivityMonitor` reports connectivity; `ManualConnectivityMonitor`
+  lets a host that already owns the signal set it by hand.
+- Queries, subscriptions and mutations made while online are forwarded
+  untouched. A mutation made offline is stored in the queue and its request
+  resolves with an `OfflineMutationException` naming the queue id — the write is
+  not lost, it is waiting.
+- Replay happens on reconnect, one entry at a time, oldest first. Each replayed
+  request carries an `OfflineIdempotencyKey` in its context, so a server that
+  understands an idempotency header can tell a replay from a new write.
+- An identical payload (same document, operation name and variables) is queued
+  once; pass `deduplicate: false` to keep every call.
+- A replay that cannot be delivered (transport failure) stays at the head of the
+  queue with its attempt count incremented and is surfaced on
+  `OfflineMutationLink.onReplayFailure`. A response carrying GraphQL errors
+  counts as delivered: the server answered, so the entry leaves the queue and is
+  emitted on `onDelivered` for the app to inspect.
+- Persistence is a `MutationQueueStore` — the default keeps the queue in memory
+  only. Implement the store on top of Hive or a database to survive a restart.
+
+See [specs/005-offline-mutation-queue/spec.md](../../specs/005-offline-mutation-queue/spec.md)
+for the requirements.
+
 ### AWS AppSync Support
 
 **Cognito Pools**
