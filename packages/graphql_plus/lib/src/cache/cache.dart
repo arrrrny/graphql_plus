@@ -11,6 +11,7 @@ import 'package:normalize/normalize.dart';
 export 'package:graphql_plus/src/cache/data_proxy.dart';
 export 'package:graphql_plus/src/cache/store.dart';
 export 'package:graphql_plus/src/cache/hive_store.dart';
+export 'package:graphql_plus/src/cache/isolate_store.dart';
 export 'package:graphql_plus/src/cache/fragment.dart';
 
 typedef VariableEncoder = Object Function(Object t);
