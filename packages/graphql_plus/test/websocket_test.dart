@@ -1386,7 +1386,7 @@ Future<void> main() async {
             .where((state) => state != SocketConnectionState.connected)
             .first
             .timeout(const Duration(seconds: 5)),
-        completion(isNot(SocketConnectionState.connected))),
+        completion(isNot(SocketConnectionState.connected)),
       );
     });
 
@@ -1425,4 +1425,4 @@ Future<void> main() async {
       await done.timeout(const Duration(seconds: 5));
     });
   });
-});
+}

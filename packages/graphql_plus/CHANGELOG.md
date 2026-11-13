@@ -9,6 +9,25 @@
   link now owns the stream and keeps forwarding across rebuilds. Seeds with `notConnected` before
   the first connection, supports multiple listeners, and closes on `dispose()`. Additive: no
   existing signature, default, or export changes.
+- **`AuthLink.onAuthError`** — an optional callback that enables refresh-and-replay (closes #8,
+  upstream graphql-flutter#220). When a downstream link throws and the callback returns `true`,
+  `AuthLink` fetches a new token through `getToken` and re-sends the **original** operation once
+  with the refreshed header; otherwise the error is re-thrown unchanged. Replay happens at most
+  once, so a refreshed token that is also rejected surfaces the second error rather than looping.
+  `onAuthError` is optional, so existing `AuthLink(getToken: ...)` usage is unchanged.
+  - Note: forwarding now uses `await for` instead of `yield*`. Inside an `async*` generator the
+    error from a `yield*`-ed stream is delivered to the listener rather than thrown at the
+    `yield*`, so a surrounding `catch` never sees it and a replay there is dead code.
+  - Concurrent failed requests share a single in-flight refresh: `getToken` is called once per
+    refresh, not once per request. `getToken` should therefore be cheap and idempotent (read an
+    already-refreshed value such as `() => authStore.token`) rather than performing the refresh
+    itself.
+  - A replay is cancellable: if the consumer cancels its subscription while the refresh or the
+    replay is in flight, no replay is sent and no further events are emitted. If the refresh or
+    replay itself throws, the **original** error is surfaced rather than the secondary failure.
+  - **Changed:** `AuthLink` no longer removes or alters the request context on replay. The
+    replayed request carries the same context entries (for example `HttpLinkHeaders`) as the
+    original, so a trace header or similar survives the refresh.
 
 ## Fixed
 - **A partial `optimisticResult` no longer blanks cache fields it omits** (closes #3,
