@@ -20,7 +20,10 @@
         ],
         "kimi": [
           "speckit.bug.assess",
+          "speckit.bug.issue",
+          "speckit.bug.fetch",
           "speckit.bug.fix",
+          "speckit.bug.pr",
           "speckit.bug.test"
         ],
         "zed": [
@@ -29,7 +32,14 @@
           "speckit.bug.test"
         ]
       },
-      "registered_skills": [],
+      "registered_skills": [
+        "speckit-bug-assess",
+        "speckit-bug-issue",
+        "speckit-bug-fetch",
+        "speckit-bug-fix",
+        "speckit-bug-pr",
+        "speckit-bug-test"
+      ],
       "installed_at": "2026-11-12T20:40:30.036713+00:00"
     },
     "tdd": {
@@ -46,7 +56,12 @@
           "speckit.tdd.verify"
         ]
       },
-      "registered_skills": [],
+      "registered_skills": [
+        "speckit-tdd-setup",
+        "speckit-tdd-plan",
+        "speckit-tdd-run",
+        "speckit-tdd-verify"
+      ],
       "installed_at": "2026-11-12T20:50:17.625857+00:00"
     }
   }
