@@ -996,7 +996,7 @@ if (result.hasException) {
 [gql_error_link](https://pub.dev/packages/gql_error_link),
 [gql_dedupe_link](https://pub.dev/packages/gql_dedupe_link),
 and the api from [gql_link](https://pub.dev/packages/gql_link),
-as well as our own custom `WebSocketLink` and `AuthLink`.
+as well as our own custom `WebSocketLink`, `AuthLink` and `CookieLink`.
 
 This makes all link development coordinated across the ecosystem, so that we can leverage existing links like [gql_dio_link](https://pub.dev/packages/gql_dio_link), and all link-based clients benefit from new link development (such as [ferry](https://github.com/gql-dart/ferry)).
 
@@ -1040,6 +1040,45 @@ When combining links, **it is important to note that**:
 
 - Terminating links like `HttpLink` and `WebSocketLink` must come at the end of a route, and will not call links following them.
 - Link order is very important. In `HttpLink(myEndpoint).concat(AuthLink(getToken: authenticate))`, the `AuthLink` will never be called.
+
+### Cookie-based authentication
+
+`AuthLink` attaches a token the application mints. `CookieLink` carries the cookies the
+**server** sets, so a session-cookie flow — a login mutation, then authenticated requests —
+needs no per-request work:
+
+```dart
+final httpLink = HttpLink('https://api.example.com/graphql');
+
+final link = Link.from([
+  CookieLink(uri: Uri.parse('https://api.example.com/graphql')),
+  httpLink,
+]);
+```
+
+Cookies a response sets are recorded and sent on every later request. An explicit `Cookie`
+header on the request still wins over the store.
+
+`Credentials` selects the policy — `omit` (neither send nor record), `sameOrigin` (the
+default; cookies belonging to the endpoint's own origin) or `include` (also a cookie set by
+another origin, such as an SSO domain):
+
+```dart
+CookieLink(
+  uri: Uri.parse('https://api.example.com/graphql'),
+  credentials: Credentials.include,
+)
+```
+
+The jar itself is a seam: implement `CookieStore` to share the cookies the rest of the
+application keeps (for example the `cookie_jar` package dio uses). `InMemoryCookieStore` is
+the default and covers the RFC 6265 subset a client needs — domain and path matching,
+`Secure`, `Max-Age`/`Expires`, and replacement by name/domain/path. `SameSite` is not modelled:
+the link is not a browser and has no site context to apply it to.
+
+> **NB**: the `credentials` option is on the link, not on `HttpLink` itself. Adding it to
+> `HttpLink` is a 5.x-breaking change and is deferred to 6.x — see
+> `UPSTREAM_ISSUES_TRIAGE.md`.
 
 ### AWS AppSync Support
 
