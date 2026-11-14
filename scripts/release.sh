@@ -4,10 +4,12 @@
 #   ./scripts/release.sh <environment> [options]
 #
 # <environment> is development | staging | production. pub.dev is ONE registry,
-# so the tier selects NO target — it is echoed to the release log and nowhere
-# else: a graphql_plus release always publishes both packages to pub.dev. The
-# argument exists so the fleet's publish contract (`PUBLISH.md`) is the same
-# shape here as on every other repo, and so `development` means "build and
+# so the tier selects NO target: a graphql_plus release always publishes both
+# packages to pub.dev whatever the tier says. It is recorded in the release
+# evidence instead — the release notes footer and the tag annotation name it, so
+# a `staging` publish and a `production` publish are distinguishable after the
+# fact. The argument exists so the fleet's publish contract (`PUBLISH.md`) is the
+# same shape here as on every other repo, and so `development` means "build and
 # validate locally, ship nothing" — the dry run.
 #
 # options
@@ -91,6 +93,48 @@ changelog_notes() {
   ' "$changelog"
 }
 
+# The latest version pub.dev serves for a package, as one of three answers:
+#
+#   <version>   the package is published and this is its `latest` version
+#   absent      pub.dev answered 404 — the package has never been published
+#   (exit 2)    the answer could not be read at all
+#
+# The third case is not "absent". A network blip or a 5xx has to abort the run,
+# not be read as a first publish: the caller's next step is to tag and release,
+# and a tag for a version that is already live cannot be undone.
+pub_dev_latest_version() {
+  local name="$1" response status body version
+  if ! response="$(curl -s --max-time 20 -w '\n%{http_code}' \
+    "https://pub.dev/api/packages/$name")"; then
+    return 2
+  fi
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  case "$status" in
+    200) ;;
+    404) echo absent; return 0 ;;
+    *) return 2 ;;
+  esac
+  version="$(printf '%s' "$body" |
+    sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [ -n "$version" ] || return 2
+  printf '%s\n' "$version"
+}
+
+# The immutability precheck. Both packages are checked, and neither check may
+# guess: `absent` means nothing has been published under that name, anything
+# else is the version that is live.
+require_not_published() {
+  local name="$1" version="$2" live
+  live="$(pub_dev_latest_version "$name")" ||
+    die "could not read $name from pub.dev — refusing to tag a release for a version that may already be live. Check the connection and re-run."
+  case "$live" in
+    absent) echo "note: $name is not on pub.dev yet (first publish)" ;;
+    "$version") die "$name $version is already on pub.dev — nothing to publish" ;;
+    *) echo "note: $name is at $live on pub.dev — $version is a new version" ;;
+  esac
+}
+
 # ---------------------------------------------------------------- preflight
 
 step "Preflight"
@@ -138,20 +182,8 @@ echo "mode            : $([ "$DRY_RUN" = 1 ] && echo 'dry run (nothing is publis
 # pub.dev is immutable: a version that already exists cannot be re-cut, and the
 # whole point of a re-run is to finish one that died half way.
 if [ "$DRY_RUN" = 0 ]; then
-  published_client="$(curl -s --max-time 20 "https://pub.dev/api/packages/$CLIENT_NAME" |
-    sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p')"
-  [ -n "$published_client" ] ||
-    echo "note: $CLIENT_NAME is not on pub.dev yet (first publish)"
-  if [ "$published_client" = "$CLIENT_VERSION" ]; then
-    die "$CLIENT_NAME $CLIENT_VERSION is already on pub.dev — nothing to publish"
-  fi
-  published_flutter="$(curl -s --max-time 20 "https://pub.dev/api/packages/$FLUTTER_NAME" |
-    sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p')"
-  [ -n "$published_flutter" ] ||
-    echo "note: $FLUTTER_NAME is not on pub.dev yet (first publish)"
-  if [ "$published_flutter" = "$FLUTTER_VERSION" ]; then
-    die "$FLUTTER_NAME $FLUTTER_VERSION is already on pub.dev — nothing to publish"
-  fi
+  require_not_published "$CLIENT_NAME" "$CLIENT_VERSION"
+  require_not_published "$FLUTTER_NAME" "$FLUTTER_VERSION"
 fi
 
 # ------------------------------------------------------------- validation
@@ -283,16 +315,35 @@ confirm() {
   esac
 }
 
+# The release notes are the changelog section plus a footer that records what the
+# release actually was. pub.dev is one registry, so a `staging` run and a
+# `production` run publish the same bytes; the tier is otherwise visible nowhere
+# after the fact — no tag, no release title, no notes mention it, and a real
+# publish from either tier is irreversible. The footer is the audit trail.
+release_notes() {
+  local changelog="$1" version="$2"
+  changelog_notes "$changelog" "$version"
+  printf '\n---\n\nCut from `%s` at `%s` — environment: **%s**.\n' \
+    "$BRANCH" "$LOCAL_HEAD" "$ENVIRONMENT"
+}
+
+# The tag annotation is the other half of the record: it survives in the repo
+# even if the release is deleted. A tag cut before this footer existed is reused
+# as-is on a re-run, so its message may predate the environment.
+tag_message() {
+  printf '%s %s (%s)' "$1" "$2" "$ENVIRONMENT"
+}
+
 if [ "$LOCAL" = 0 ]; then
   confirm
   step "Tag and create the GitHub releases"
 
   notes="$(mktemp -t graphql-plus-notes)"
-  changelog_notes "$CLIENT_DIR/CHANGELOG.md" "$CLIENT_VERSION" >"$notes"
+  release_notes "$CLIENT_DIR/CHANGELOG.md" "$CLIENT_VERSION" >"$notes"
   if git rev-parse -q --verify "refs/tags/$CLIENT_TAG" >/dev/null; then
     echo "tag $CLIENT_TAG already exists — reusing it"
   else
-    git tag -a "$CLIENT_TAG" -m "$CLIENT_NAME $CLIENT_VERSION"
+    git tag -a "$CLIENT_TAG" -m "$(tag_message "$CLIENT_NAME" "$CLIENT_VERSION")"
     git push origin "refs/tags/$CLIENT_TAG"
   fi
   if gh release view "$CLIENT_TAG" --repo arrrrny/graphql_plus >/dev/null 2>&1; then
@@ -323,11 +374,11 @@ if [ "$LOCAL" = 0 ]; then
   (cd "$FLUTTER_DIR" && flutter pub publish --dry-run)
 
   notes="$(mktemp -t graphql-plus-notes)"
-  changelog_notes "$FLUTTER_DIR/CHANGELOG.md" "$FLUTTER_VERSION" >"$notes"
+  release_notes "$FLUTTER_DIR/CHANGELOG.md" "$FLUTTER_VERSION" >"$notes"
   if git rev-parse -q --verify "refs/tags/$FLUTTER_TAG" >/dev/null; then
     echo "tag $FLUTTER_TAG already exists — reusing it"
   else
-    git tag -a "$FLUTTER_TAG" -m "$FLUTTER_NAME $FLUTTER_VERSION"
+    git tag -a "$FLUTTER_TAG" -m "$(tag_message "$FLUTTER_NAME" "$FLUTTER_VERSION")"
     git push origin "refs/tags/$FLUTTER_TAG"
   fi
   if gh release view "$FLUTTER_TAG" --repo arrrrny/graphql_plus >/dev/null 2>&1; then
@@ -360,10 +411,11 @@ step "Verify both packages on pub.dev"
 for pair in "$CLIENT_NAME:$CLIENT_VERSION" "$FLUTTER_NAME:$FLUTTER_VERSION"; do
   name="${pair%%:*}"
   version="${pair##*:}"
-  live="$(curl -sf --max-time 20 "https://pub.dev/api/packages/$name" |
-    sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if ! live="$(pub_dev_latest_version "$name")"; then
+    die "could not read $name from pub.dev — the publish may or may not have landed. Check: gh run list --workflow 'Release'"
+  fi
   [ "$live" = "$version" ] ||
-    die "$name is at ${live:-unknown} on pub.dev, expected $version"
+    die "$name is at ${live} on pub.dev, expected $version"
   echo "$name $version — live on pub.dev"
 done
 
