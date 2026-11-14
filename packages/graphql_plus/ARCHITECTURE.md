@@ -85,6 +85,29 @@ Other than the ability for users to provide their own custom `Store`, the
 rest of the cache normalization magic is handled by the [`normalize`]
 library.
 
+## Offline
+
+```bash
+tree lib/src/offline
+├── connectivity.dart          # ConnectivityMonitor (host-supplied connectivity)
+├── mutation_queue.dart        # OfflineMutationQueue + QueuedMutation + store
+└── offline_mutation_link.dart # OfflineMutationLink, the link that drives it
+```
+
+`OfflineMutationLink` sits in front of the terminating link: queries,
+subscriptions and mutations made while online are forwarded untouched, and a
+mutation made while the `ConnectivityMonitor` reports offline is written to an
+`OfflineMutationQueue` and resolved with an `OfflineMutationException` instead
+of being lost. When the monitor reports online the queue is drained one entry
+at a time, oldest first, through the wrapped link; each delivered mutation is
+emitted on `onDelivered` (a response carrying GraphQL errors is a delivery: the
+server answered), and a transport failure stops the drain, keeps that entry at
+the head and emits on `onReplayFailure`. Ordering, dedup (deterministic
+`OfflineIdempotencyKey`, carried in the replayed request's context) and the
+attempt bookkeeping live in the queue; persistence goes through a
+`MutationQueueStore`, in-memory by default. This is deliberately a link rather
+than `QueryManager` logic — #652's direction for client features.
+
 ## The Rest
 
 `exceptions` defines a few custom `LinkExceptions` as well as the

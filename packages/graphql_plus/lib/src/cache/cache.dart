@@ -11,6 +11,7 @@ import 'package:normalize/normalize.dart';
 export 'package:graphql_plus/src/cache/data_proxy.dart';
 export 'package:graphql_plus/src/cache/store.dart';
 export 'package:graphql_plus/src/cache/hive_store.dart';
+export 'package:graphql_plus/src/cache/isolate_store.dart';
 export 'package:graphql_plus/src/cache/fragment.dart';
 
 typedef VariableEncoder = Object Function(Object t);
@@ -190,12 +191,19 @@ class GraphQLCache extends NormalizingDataProxy {
     String addId,
   ) {
     inflightOptimisticTransactions += 1;
-    final _proxy = transaction(OptimisticProxy(this)) as OptimisticProxy;
-    if (_safeToAdd(addId)) {
-      optimisticPatches.add(_proxy.asPatch(addId));
-      broadcastRequested = broadcastRequested || _proxy.broadcastRequested;
+    // The transaction callback runs user code (`MutationOptions.update`), so any
+    // throw from it must not skip the decrement: the counter gates
+    // [shouldBroadcast], and a leaked count disables cache broadcasts for the
+    // whole client.
+    try {
+      final _proxy = transaction(OptimisticProxy(this)) as OptimisticProxy;
+      if (_safeToAdd(addId)) {
+        optimisticPatches.add(_proxy.asPatch(addId));
+        broadcastRequested = broadcastRequested || _proxy.broadcastRequested;
+      }
+    } finally {
+      inflightOptimisticTransactions -= 1;
     }
-    inflightOptimisticTransactions -= 1;
   }
 
   /// Remove a given patch from the list
