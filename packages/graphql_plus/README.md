@@ -1044,7 +1044,7 @@ if (result.hasException) {
 [gql_error_link](https://pub.dev/packages/gql_error_link),
 [gql_dedupe_link](https://pub.dev/packages/gql_dedupe_link),
 and the api from [gql_link](https://pub.dev/packages/gql_link),
-as well as our own custom `WebSocketLink`, `AuthLink` and `CookieLink`.
+as well as our own custom `WebSocketLink`, `AuthLink`, `CookieLink` and `DioLink`.
 
 This makes all link development coordinated across the ecosystem, so that we can leverage existing links like [gql_dio_link](https://pub.dev/packages/gql_dio_link), and all link-based clients benefit from new link development (such as [ferry](https://github.com/gql-dart/ferry)).
 
@@ -1088,6 +1088,67 @@ When combining links, **it is important to note that**:
 
 - Terminating links like `HttpLink` and `WebSocketLink` must come at the end of a route, and will not call links following them.
 - Link order is very important. In `HttpLink(myEndpoint).concat(AuthLink(getToken: authenticate))`, the `AuthLink` will never be called.
+
+### Choosing an HTTP transport: dio or http
+
+Two terminating links send operations over HTTP: `HttpLink` (and its cancellable
+in-tree variant `CancellableHttpLink`), which uses `package:http`, and `DioLink`,
+which sends through [dio](https://pub.dev/packages/dio).
+
+They accept the same requests and raise the same exceptions — a non-2xx status
+or a response missing both `data` and `errors` is an `HttpLinkServerException`,
+an unparseable body is an `HttpLinkParserException` — so the transport is a
+construction-time choice and nothing downstream changes.
+
+`DioLink` takes the `Dio` instance the application already has, so the GraphQL
+transport shares its interceptors, timeouts, cookie handling and connection
+pooling with the REST calls:
+
+```dart
+final dio = Dio(BaseOptions(
+  connectTimeout: const Duration(seconds: 10),
+  receiveTimeout: const Duration(seconds: 10),
+))
+  ..interceptors.add(authRefreshInterceptor)   // refresh a token, retry once
+  ..interceptors.add(logInterceptor)
+  ..interceptors.add(CookieManager(cookieJar)); // session cookies, REST and GraphQL
+
+final link = DioLink('https://api.example.com/graphql', client: dio);
+```
+
+When `client` is omitted the link creates its own `Dio` and closes it on
+`dispose()`; a client it did not create is left alone, so the interceptor chain
+outlives the link.
+
+`DioLink` mirrors `HttpLink`'s options and adds nothing to learn:
+
+```dart
+DioLink(
+  'https://api.example.com/graphql',
+  defaultHeaders: const {'x-app-version': '1.2.3'},
+  useGETForQueries: true, // queries as GET, mutations stay POST
+  responseDecoder: (response) => decrypt(response.data as Map<String, dynamic>),
+);
+```
+
+A request's `HttpLinkHeaders` are applied per request, and a `CancellationToken`
+in the request context aborts the in-flight exchange and surfaces a
+`CancelledException`, exactly as `CancellableHttpLink` does. Variables carrying
+an `http.MultipartFile` are sent as a GraphQL multipart request in the same shape
+`HttpLink` sends, so upload code does not change with the transport.
+
+Which to pick:
+
+- **`DioLink`** — the app already uses dio (interceptor-based auth refresh,
+  cookie jars, a shared timeout policy), or wants dio's ecosystem of adapters
+  and transformers. It pulls `dio` in as a dependency of `graphql`.
+- **`HttpLink` / `CancellableHttpLink`** — the app has no dio client to share.
+  `package:http` is the smaller dependency, and neither transport is faster than
+  the other.
+
+Cookies work on both: `CookieLink` sits in front of whichever link is used, and
+a dio `CookieManager` interceptor covers the same ground when a dio client is
+already in play.
 
 ### Cookie-based authentication
 
