@@ -107,7 +107,7 @@ void main() {
 
       expect(responses, hasLength(1));
       expect(responses.single.data, {
-        'viewer': {'id': '1'}
+        'viewer': {'id': '1'},
       });
       expect(responses.single.errors, isNull);
       await link.dispose();
@@ -163,20 +163,24 @@ void main() {
       );
     });
 
-    test('sends a GET with the operation encoded when useGETForQueries',
-        () async {
-      final server = await _Server().start();
-      addTearDown(server.stop);
+    test(
+      'sends a GET with the operation encoded when useGETForQueries',
+      () async {
+        final server = await _Server().start();
+        addTearDown(server.stop);
 
-      final link = DioLink(server.url, useGETForQueries: true);
-      await link.request(_request()).drain<void>();
+        final link = DioLink(server.url, useGETForQueries: true);
+        await link.request(_request()).drain<void>();
 
-      expect(server.sent, hasLength(1));
-      expect(server.sent.single.method, 'GET');
-      expect(
-          server.sent.single.uri.queryParameters['query'], contains('viewer'));
-      await link.dispose();
-    });
+        expect(server.sent, hasLength(1));
+        expect(server.sent.single.method, 'GET');
+        expect(
+          server.sent.single.uri.queryParameters['query'],
+          contains('viewer'),
+        );
+        await link.dispose();
+      },
+    );
 
     test('POSTs a mutation even when useGETForQueries is set', () async {
       final server = await _Server().start();
@@ -208,22 +212,23 @@ void main() {
       await link.dispose();
     });
 
-    test('exposes the response status code and headers in the context',
-        () async {
-      final server = await _Server(
-        body: '{"data": {"viewer": {"id": "1"}}}',
-      ).start();
-      addTearDown(server.stop);
+    test(
+      'exposes the response status code and headers in the context',
+      () async {
+        final server =
+            await _Server(body: '{"data": {"viewer": {"id": "1"}}}').start();
+        addTearDown(server.stop);
 
-      final link = DioLink(server.url);
-      final response = await link.request(_request()).first;
+        final link = DioLink(server.url);
+        final response = await link.request(_request()).first;
 
-      final context = response.context.entry<HttpLinkResponseContext>();
-      expect(context, isNotNull);
-      expect(context!.statusCode, 200);
-      expect(context.headers!['content-type'], contains('application/json'));
-      await link.dispose();
-    });
+        final context = response.context.entry<HttpLinkResponseContext>();
+        expect(context, isNotNull);
+        expect(context!.statusCode, 200);
+        expect(context.headers!['content-type'], contains('application/json'));
+        await link.dispose();
+      },
+    );
 
     test('surfaces a non-2xx response as HttpLinkServerException', () async {
       final server = await _Server(
@@ -241,9 +246,8 @@ void main() {
     });
 
     test('returns the GraphQL errors a 200 response reports', () async {
-      final server = await _Server(
-        body: '{"errors": [{"message": "nope"}]}',
-      ).start();
+      final server =
+          await _Server(body: '{"errors": [{"message": "nope"}]}').start();
       addTearDown(server.stop);
 
       final link = DioLink(server.url);
@@ -255,17 +259,19 @@ void main() {
       await link.dispose();
     });
 
-    test('surfaces a response it cannot parse as HttpLinkParserException',
-        () async {
-      final server = await _Server(body: '{"data": "not a map"}').start();
-      addTearDown(server.stop);
+    test(
+      'surfaces a response it cannot parse as HttpLinkParserException',
+      () async {
+        final server = await _Server(body: '{"data": "not a map"}').start();
+        addTearDown(server.stop);
 
-      final link = DioLink(server.url);
-      final error = await _errorOf(link, _request());
+        final link = DioLink(server.url);
+        final error = await _errorOf(link, _request());
 
-      expect(error, isA<HttpLinkParserException>());
-      await link.dispose();
-    });
+        expect(error, isA<HttpLinkParserException>());
+        await link.dispose();
+      },
+    );
 
     test('decodes an enveloped body with a responseDecoder', () async {
       final server = await _Server(
@@ -275,29 +281,30 @@ void main() {
 
       final link = DioLink(
         server.url,
-        responseDecoder: (dio.Response<dynamic> response) =>
-            (response.data as Map<String, dynamic>)['wrapped']
-                as Map<String, dynamic>,
+        responseDecoder: (dio.Response<dynamic> response) => (response.data
+            as Map<String, dynamic>)['wrapped'] as Map<String, dynamic>,
       );
       final response = await link.request(_request()).first;
 
       expect(response.data, {
-        'viewer': {'id': '9'}
+        'viewer': {'id': '9'},
       });
       await link.dispose();
     });
 
-    test('surfaces a null responseDecoder result as HttpLinkParserException',
-        () async {
-      final server = await _Server().start();
-      addTearDown(server.stop);
+    test(
+      'surfaces a null responseDecoder result as HttpLinkParserException',
+      () async {
+        final server = await _Server().start();
+        addTearDown(server.stop);
 
-      final link = DioLink(server.url, responseDecoder: (_) => null);
-      final error = await _errorOf(link, _request());
+        final link = DioLink(server.url, responseDecoder: (_) => null);
+        final error = await _errorOf(link, _request());
 
-      expect(error, isA<HttpLinkParserException>());
-      await link.dispose();
-    });
+        expect(error, isA<HttpLinkParserException>());
+        await link.dispose();
+      },
+    );
 
     test('maps a cancelled request to CancelledException', () async {
       final server = await _Server(
@@ -322,9 +329,7 @@ void main() {
     });
 
     test('reports a transport failure as a link exception', () async {
-      final server = await _Server(
-        delay: const Duration(seconds: 2),
-      ).start();
+      final server = await _Server(delay: const Duration(seconds: 2)).start();
       addTearDown(server.stop);
 
       final client = dio.Dio(
@@ -341,74 +346,83 @@ void main() {
       client.close(force: true);
     });
 
-    test('sends a multipart upload when variables carry an http.MultipartFile',
-        () async {
-      final server = await _Server(
-        body: '{"data": {"uploadFile": {"id": "123", "filename": "test.txt"}}}',
-      ).start();
-      addTearDown(server.stop);
+    test(
+      'sends a multipart upload when variables carry an http.MultipartFile',
+      () async {
+        final server = await _Server(
+          body:
+              '{"data": {"uploadFile": {"id": "123", "filename": "test.txt"}}}',
+        ).start();
+        addTearDown(server.stop);
 
-      final link = DioLink(server.url);
-      final request = _request(
-        source: 'mutation UploadFile(\$file: Upload!) {'
-            ' uploadFile(file: \$file) { id filename } }',
-        variables: {
-          'file': http.MultipartFile.fromBytes(
-            'variables.file',
-            utf8.encode('Hello, World!'),
-            filename: 'test.txt',
-            contentType: MediaType('text', 'plain'),
+        final link = DioLink(server.url);
+        final request = _request(
+          source: 'mutation UploadFile(\$file: Upload!) {'
+              ' uploadFile(file: \$file) { id filename } }',
+          variables: {
+            'file': http.MultipartFile.fromBytes(
+              'variables.file',
+              utf8.encode('Hello, World!'),
+              filename: 'test.txt',
+              contentType: MediaType('text', 'plain'),
+            ),
+          },
+        );
+        final response = await link.request(request).first;
+
+        expect(response.data!['uploadFile']!['id'], '123');
+        expect(server.sent, hasLength(1));
+        final sent = server.sent.single;
+        expect(sent.method, 'POST');
+        expect(sent.headers['content-type'], startsWith('multipart/form-data'));
+        expect(sent.body, contains('name="operations"'));
+        expect(sent.body, contains('name="map"'));
+        expect(sent.body, contains('filename="test.txt"'));
+        await link.dispose();
+      },
+    );
+
+    test(
+      'carries the cookies CookieLink learned on the next request',
+      () async {
+        final server =
+            await _Server(setCookies: const ['session=abc; Path=/']).start();
+        addTearDown(server.stop);
+
+        final link = Link.from([
+          CookieLink(uri: Uri.parse(server.url)),
+          DioLink(server.url),
+        ]);
+
+        await link.request(_request()).drain<void>();
+        await link.request(_request()).drain<void>();
+
+        expect(server.sent, hasLength(2));
+        expect(server.sent.first.cookie, isNull);
+        expect(server.sent.last.cookie, 'session=abc');
+        await link.dispose();
+      },
+    );
+
+    test(
+      'sends the caller configuration through a shared Dio client',
+      () async {
+        final server = await _Server().start();
+        addTearDown(server.stop);
+
+        final client = dio.Dio(
+          dio.BaseOptions(
+            baseUrl: server.url,
+            headers: const {'x-base': 'base'},
           ),
-        },
-      );
-      final response = await link.request(request).first;
+        );
+        final link = DioLink(server.url, client: client);
+        await link.request(_request()).drain<void>();
 
-      expect(response.data!['uploadFile']!['id'], '123');
-      expect(server.sent, hasLength(1));
-      final sent = server.sent.single;
-      expect(sent.method, 'POST');
-      expect(sent.headers['content-type'], startsWith('multipart/form-data'));
-      expect(sent.body, contains('name="operations"'));
-      expect(sent.body, contains('name="map"'));
-      expect(sent.body, contains('filename="test.txt"'));
-      await link.dispose();
-    });
-
-    test('carries the cookies CookieLink learned on the next request',
-        () async {
-      final server = await _Server(
-        setCookies: const ['session=abc; Path=/'],
-      ).start();
-      addTearDown(server.stop);
-
-      final link = Link.from([
-        CookieLink(uri: Uri.parse(server.url)),
-        DioLink(server.url),
-      ]);
-
-      await link.request(_request()).drain<void>();
-      await link.request(_request()).drain<void>();
-
-      expect(server.sent, hasLength(2));
-      expect(server.sent.first.cookie, isNull);
-      expect(server.sent.last.cookie, 'session=abc');
-      await link.dispose();
-    });
-
-    test('sends the caller configuration through a shared Dio client',
-        () async {
-      final server = await _Server().start();
-      addTearDown(server.stop);
-
-      final client = dio.Dio(
-        dio.BaseOptions(baseUrl: server.url, headers: const {'x-base': 'base'}),
-      );
-      final link = DioLink(server.url, client: client);
-      await link.request(_request()).drain<void>();
-
-      expect(server.sent, hasLength(1));
-      expect(server.sent.single.headers['x-base'], 'base');
-      await link.dispose();
-    });
+        expect(server.sent, hasLength(1));
+        expect(server.sent.single.headers['x-base'], 'base');
+        await link.dispose();
+      },
+    );
   });
 }
