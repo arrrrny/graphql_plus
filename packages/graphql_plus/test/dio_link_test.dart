@@ -267,6 +267,38 @@ void main() {
       await link.dispose();
     });
 
+    test('decodes an enveloped body with a responseDecoder', () async {
+      final server = await _Server(
+        body: '{"wrapped": {"data": {"viewer": {"id": "9"}}}}',
+      ).start();
+      addTearDown(server.stop);
+
+      final link = DioLink(
+        server.url,
+        responseDecoder: (dio.Response<dynamic> response) =>
+            (response.data as Map<String, dynamic>)['wrapped']
+                as Map<String, dynamic>,
+      );
+      final response = await link.request(_request()).first;
+
+      expect(response.data, {
+        'viewer': {'id': '9'}
+      });
+      await link.dispose();
+    });
+
+    test('surfaces a null responseDecoder result as HttpLinkParserException',
+        () async {
+      final server = await _Server().start();
+      addTearDown(server.stop);
+
+      final link = DioLink(server.url, responseDecoder: (_) => null);
+      final error = await _errorOf(link, _request());
+
+      expect(error, isA<HttpLinkParserException>());
+      await link.dispose();
+    });
+
     test('maps a cancelled request to CancelledException', () async {
       final server = await _Server(
         body: '{"data": {"viewer": {"id": "1"}}}',

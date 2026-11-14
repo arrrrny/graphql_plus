@@ -207,14 +207,18 @@ class DioLink extends Link {
       // HttpLinkServerException both transports throw.
       validateStatus: (int? status) => true,
     );
-    final encodedBody = _encodeAttempter(
-      request,
-      (Map<String, dynamic> body) => json.encode(
-        body,
-        toEncodable: (dynamic object) =>
-            (object is http.MultipartFile) ? null : object.toJson(),
-      ),
-    )(body);
+    // Encoded only on the POST paths: a GET query sends the operation as URI
+    // parameters, so encoding a body for it would be a JSON encode over every
+    // variable (toEncodable included) that is then thrown away — upstream
+    // gql_http_link computes the body after the GET branch has been ruled out.
+    String encodeBody() => _encodeAttempter(
+          request,
+          (Map<String, dynamic> body) => json.encode(
+            body,
+            toEncodable: (dynamic object) =>
+                (object is http.MultipartFile) ? null : object.toJson(),
+          ),
+        )(body);
 
     final cancellation = _cancelTokenOf(request);
     try {
@@ -222,7 +226,7 @@ class DioLink extends Link {
       if (fileMap.isNotEmpty) {
         return await client.post<dynamic>(
           uri.toString(),
-          data: _multipartBody(encodedBody, fileMap),
+          data: _multipartBody(encodeBody(), fileMap),
           options: options,
           cancelToken: cancellation?.token,
         );
@@ -243,7 +247,7 @@ class DioLink extends Link {
 
       return await client.post<dynamic>(
         uri.toString(),
-        data: encodedBody,
+        data: encodeBody(),
         options: options,
         cancelToken: cancellation?.token,
       );
