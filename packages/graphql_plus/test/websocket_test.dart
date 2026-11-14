@@ -1710,6 +1710,33 @@ Future<void> main() async {
       expect(harness.sockets, isEmpty);
     });
 
+    test('a reconnect interleaved with dispose leaks no socket', () async {
+      final harness = await startLinkServer();
+      final link = WebSocketLink(
+        'ws://127.0.0.1:${harness.server.port}',
+        config: const SocketClientConfig(autoReconnect: false),
+      );
+      addTearDown(link.dispose);
+
+      link.connectOrReconnect();
+      await link.connectionState
+          .where((state) => state == SocketConnectionState.connected)
+          .first;
+      expect(harness.sockets, hasLength(1));
+
+      // [dispose] hands the teardown to the event loop, and [connectOrReconnect] is public
+      // API, so a caller can interleave them. Before the guard that rebuild installed a
+      // client [dispose] then nulled without ever closing — a live socket nobody owns.
+      final pending = link.dispose();
+      expect(() => link.connectOrReconnect(), throwsStateError);
+      await pending;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(harness.sockets, hasLength(1),
+          reason: 'the interleaved reconnect must not open a second socket');
+      expect(link.getSocketClient, isNull);
+    });
+
     test('closes after dispose', () async {
       final harness = await startLinkServer();
       final link = WebSocketLink('ws://127.0.0.1:${harness.server.port}');
