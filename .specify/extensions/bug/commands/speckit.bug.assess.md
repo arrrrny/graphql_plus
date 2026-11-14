@@ -22,13 +22,15 @@ If both a URL and text are present, fetch the URL and merge its content with the
 
 ### `--issue` (issue auto-creation override)
 
-`--issue` in `$ARGUMENTS` requests that the GitHub issue be filed for this run. Strip it from the description before forming the bug summary. It enables the `auto_create_issue` setting for this run only — `bug-config.yml` is never edited.
+`--issue` in `$ARGUMENTS` requests that the GitHub issue be filed for this run. Strip it from the description before forming the bug summary. It applies to this run only — `bug-config.yml` is never edited.
 
-This command does **not** call `gh` itself. Auto-filing is driven by the extension's `after_bug_assess` hook (`speckit.bug.issue`), whose `condition` reads the `auto_create_issue` config. So `--issue` is honoured only while that hook is bound; the three cases are:
+Exactly one of these three cases applies:
 
-- `auto_create_issue: true` in `.specify/extensions/bug/bug-config.yml` — the hook fires automatically after the assessment is written, with or without the flag.
-- `--issue`, setting `false` — the hook should fire for this run. If it does not (the hook is not registered in this checkout — check `.specify/extensions/bug/extension.yml` for `hooks.after_bug_assess`), say so explicitly and offer `__SPECKIT_COMMAND_BUG_ISSUE__ slug=<BUG_SLUG>` as the next step rather than claiming the issue was filed.
+- `auto_create_issue: true` in `.specify/extensions/bug/bug-config.yml` — the extension's `after_bug_assess` hook (`speckit.bug.issue`) fires automatically once the assessment is written, with or without the flag. Do **not** file the issue yourself as well; the hook already did.
+- `--issue` with `auto_create_issue` false — the hook's condition (`config.auto_create_issue == 'true'`, evaluated by the extension host against the config file) is false, so the hook is skipped and nothing else files the issue. `assess` files it, performing the same procedure as `__SPECKIT_COMMAND_BUG_ISSUE__` for this slug: read the assessment you just wrote, create the GitHub issue with `gh`, and record `BUG_DIR/issue.md`. If `gh`/the GitHub remote/auth is unavailable, write `BUG_DIR/issue-draft.md` and state that the issue was not filed — never claim it was.
 - Neither — the assessment is written and the issue step is only *suggested*.
+
+The second case is what makes the override work when the hook cannot fire at all — the config is `false`, or this checkout has no `hooks.after_bug_assess` in `.specify/extensions/bug/extension.yml`. The flag does not depend on the hook being bound.
 
 ## Slug Resolution
 
@@ -173,8 +175,8 @@ Do not attempt to validate the URL by issuing a preflight `HEAD` (or any other) 
    - The slug used and whether it was user-provided, asked-for, or auto-generated. State it on its own line (e.g. `Slug: <BUG_SLUG>`) so it is easy to spot — downstream commands in the same session may reuse it from context without re-prompting.
    - The path `.specify/bugs/<BUG_SLUG>/assessment.md`.
    - The verdict and severity.
-   - Whether the GitHub issue was auto-filed (by the `after_bug_assess` hook), and its URL when it was.
-   - The next suggested step: `__SPECKIT_COMMAND_BUG_FIX__ slug=<BUG_SLUG>` (or `__SPECKIT_COMMAND_BUG_ISSUE__ slug=<BUG_SLUG>` when `--issue` was requested and the hook did not fire).
+   - Whether the GitHub issue was filed (by the `after_bug_assess` hook, or inline by the `--issue` override), and its URL when it was.
+   - The next suggested step: `__SPECKIT_COMMAND_BUG_FIX__ slug=<BUG_SLUG>` (or `__SPECKIT_COMMAND_BUG_ISSUE__ slug=<BUG_SLUG>` when neither the hook nor `--issue` filed it).
 
 ## Guardrails
 
@@ -182,4 +184,4 @@ Do not attempt to validate the URL by issuing a preflight `HEAD` (or any other) 
 - Never invent reproduction steps or file paths that are not supported by either the report or the codebase.
 - Never overwrite an existing `assessment.md` without confirmation.
 - If the bug report cannot be understood at all (empty, unrelated, spam), set verdict to `invalid` with a clear reason and stop.
-- `--issue` never causes this command to call `gh` itself, and never edits `bug-config.yml` — the per-run override is not persisted.
+- `--issue` files the issue for this run only — through the `after_bug_assess` hook when the config enables it, inline when it does not. It never edits `bug-config.yml`: the per-run override is not persisted.
