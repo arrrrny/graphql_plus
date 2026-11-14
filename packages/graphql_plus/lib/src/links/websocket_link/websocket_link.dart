@@ -6,6 +6,7 @@ import 'package:rxdart/rxdart.dart';
 
 import './websocket_client.dart';
 
+export './appsync_link.dart';
 export './websocket_client.dart';
 export './websocket_messages.dart';
 

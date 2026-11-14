@@ -43,6 +43,7 @@ enum ToggleConnectionState { disconnect, connect }
 class SocketClientConfig {
   const SocketClientConfig(
       {this.serializer = const RequestSerializer(),
+      this.serialize,
       this.parser = const ResponseParser(),
       this.autoReconnect = true,
       this.queryAndMutationTimeout = const Duration(seconds: 10),
@@ -58,6 +59,17 @@ class SocketClientConfig {
 
   /// Serializer used to serialize request
   final RequestSerializer serializer;
+
+  /// Optional override for how a [Request] is serialized into the payload of
+  /// start/subscribe messages.
+  ///
+  /// It may return a [Future]; when it does, serialization — and with it any
+  /// dynamic per-message authorization (e.g. a refreshed Cognito token) — is
+  /// awaited before the message is written. When null, [serializer] is used.
+  ///
+  /// Used by [AppSyncRequestSerializer] to build the AppSync REALTIME
+  /// envelope.
+  final FutureOr<Map<String, dynamic>> Function(Request request)? serialize;
 
   /// Response parser
   final ResponseParser parser;
@@ -231,6 +243,35 @@ class GraphQLProtocol {
   static const String graphqlTransportWs = "graphql-transport-ws";
 }
 
+/// AWS AppSync REALTIME protocol constants.
+///
+/// AppSync speaks its own REALTIME dialect over the websocket: the upgrade
+/// offers the legacy `graphql-ws` subprotocol, but the message flow follows
+/// AppSync's documented naming (`connection_init`, `connection_ack`, `start`,
+/// `start_ack`, `data`, `stop`, `complete`, `ka`). Connection authorization
+/// travels in `header`/`payload` query parameters, and every start message
+/// carries per-message authorization in `payload.extensions.authorization`.
+///
+/// See the
+/// [AppSync REALTIME client guide](https://docs.aws.amazon.com/appsync/latest/devguide/real-time-websocket-client.html)
+/// and [AppSyncWebSocketLink].
+class AppSyncProtocol {
+  AppSyncProtocol._();
+
+  /// The subprotocol AppSync's realtime gateway expects in the upgrade
+  /// request. Note that this is the legacy `graphql-ws` string even though
+  /// AppSync's message types follow its own REALTIME naming.
+  static const String wireSubProtocol = GraphQLProtocol.graphqlWs;
+
+  /// Sentinel value for [SocketClient.protocol] selecting AppSync REALTIME
+  /// behavior: wait for `connection_ack` before any `start`, answer
+  /// keep-alives with the `ka` watchdog (AppSync has no ping/pong
+  /// half-protocol), and send `stop` on unsubscribe.
+  ///
+  /// Use [AppSyncWebSocketLink] instead of wiring this by hand.
+  static const String realtime = 'appsync-realtime';
+}
+
 /// Wraps a standard web socket instance to marshal and un-marshal the server /
 /// client payloads into dart object representation.
 ///
@@ -293,8 +334,23 @@ class SocketClient {
   Timer? _keepAliveTimer;
   StreamSubscription<GraphQLSocketMessage>? _messageSubscription;
 
-  Map<String, dynamic> Function(Request) get serialize =>
-      config.serializer.serializeRequest;
+  /// Serializes [request] into the payload of a start/subscribe message,
+  /// honoring [SocketClientConfig.serialize] when set. The result may be a
+  /// [Future] when the override computes the payload (e.g. per-message
+  /// authorization) asynchronously.
+  FutureOr<Map<String, dynamic>> serializeRequest(Request request) =>
+      config.serialize?.call(request) ??
+      config.serializer.serializeRequest(request);
+
+  bool get _isAppSync => protocol == AppSyncProtocol.realtime;
+
+  /// Subprotocol values offered in the websocket upgrade request.
+  /// AppSync's realtime gateway expects the legacy `graphql-ws` string,
+  /// which [AppSyncProtocol.realtime] is not, so it is resolved to
+  /// [AppSyncProtocol.wireSubProtocol] here.
+  Iterable<String> get _wireProtocols => _isAppSync
+      ? const <String>[AppSyncProtocol.wireSubProtocol]
+      : <String>[protocol];
 
   Response Function(Map<String, dynamic>) get parse =>
       config.parser.parseResponse;
@@ -375,11 +431,13 @@ class SocketClient {
       // config.connect is async; awaiting it keeps the
       // SocketConnectionState.connected attribution from overloading
       // SocketConnectionState.connecting
-      var connection =
-          await config.connect(uri: Uri.parse(url), protocols: [protocol]);
+      var connection = await config.connect(
+        uri: Uri.parse(url),
+        protocols: _wireProtocols,
+      );
       socketChannel = connection.forGraphQL();
 
-      if (protocol == GraphQLProtocol.graphqlTransportWs) {
+      if (_isAppSync || protocol == GraphQLProtocol.graphqlTransportWs) {
         _connectionStateController.add(SocketConnectionState.handshake);
       } else {
         _connectionStateController.add(SocketConnectionState.connected);
@@ -393,10 +451,33 @@ class SocketClient {
         await _messages.firstWhere(
             (message) => message.type == MessageTypes.connectionAck);
         _connectionStateController.add(SocketConnectionState.connected);
+      } else if (_isAppSync) {
+        // AppSync ignores everything sent before connection_ack, so the
+        // handshake must complete before any start message goes out. A
+        // rejected handshake (e.g. an expired token) arrives as
+        // connection_error followed by a server-side close — surface it so
+        // onConnectionLost schedules a reconnect with freshly-resolved
+        // authorization.
+        final firstHandshakeMessage = await _messages.firstWhere(
+          (message) =>
+              message.type == MessageTypes.connectionAck ||
+              message.type == MessageTypes.connectionError,
+        );
+        if (firstHandshakeMessage.type == MessageTypes.connectionError) {
+          throw Exception(
+            'AppSync realtime handshake rejected: '
+            '${json.encode(firstHandshakeMessage.toJson())}',
+          );
+        }
+        _connectionStateController.add(SocketConnectionState.connected);
       }
 
       if (config.inactivityTimeout != null) {
-        if (protocol == GraphQLProtocol.graphqlWs) {
+        // AppSync's realtime gateway sends `ka` messages just like a legacy
+        // `graphql-ws` server, so the same watchdog applies; AppSync has no
+        // ping/pong half-protocol, so the transport-ws ping path must NOT
+        // arm for it.
+        if (protocol == GraphQLProtocol.graphqlWs || _isAppSync) {
           _disconnectOnKeepAliveTimeout(_messages);
         }
       }
@@ -629,7 +710,7 @@ class SocketClient {
           : waitForConnectedStateWithoutTimeout;
 
       sub?.cancel();
-      sub = waitForConnectedState.listen((_) {
+      sub = waitForConnectedState.listen((_) async {
         final Stream<GraphQLSocketMessage> dataErrorComplete = _messages.where(
           (GraphQLSocketMessage message) {
             if (message is SubscriptionData) {
@@ -702,20 +783,31 @@ class SocketClient {
             .listen((message) => response.addError(message));
 
         if (!_subscriptionInitializers[id]!.hasBeenTriggered) {
-          GraphQLSocketMessage operation;
-          if (protocol == GraphQLProtocol.graphqlTransportWs) {
-            operation = SubscribeOperation(
-              id,
-              serialize(payload),
-            );
-          } else {
-            operation = StartOperation(
-              id,
-              serialize(payload),
-            );
-          }
-          _write(operation);
+          // Claim the slot before awaiting: the async serialization below
+          // must not race a second connected-state event into a duplicate
+          // start message.
           _subscriptionInitializers[id]!.hasBeenTriggered = true;
+          try {
+            final serialized = await serializeRequest(payload);
+            GraphQLSocketMessage operation;
+            if (protocol == GraphQLProtocol.graphqlTransportWs) {
+              operation = SubscribeOperation(
+                id,
+                serialized,
+              );
+            } else {
+              operation = StartOperation(
+                id,
+                serialized,
+              );
+            }
+            _write(operation);
+          } catch (e, stackTrace) {
+            // A failing serialization (e.g. an authorization provider that
+            // cannot produce a token) must surface on the response stream
+            // instead of vanishing into the zone.
+            response.addError(e, stackTrace);
+          }
         }
       });
     };
@@ -726,7 +818,9 @@ class SocketClient {
       _subscriptionInitializers.remove(id);
 
       sub?.cancel();
-      if (protocol == GraphQLProtocol.graphqlWs &&
+      // AppSync unregisters a subscription with a stop message, exactly like
+      // the legacy graphql-ws protocol.
+      if ((protocol == GraphQLProtocol.graphqlWs || _isAppSync) &&
           _connectionStateController.value == SocketConnectionState.connected &&
           socketChannel != null) {
         _write(StopOperation(id));
