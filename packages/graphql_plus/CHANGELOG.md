@@ -1,6 +1,25 @@
 # v5.3.0
 
 ## Added
+- **`CookieLink`** — a link that carries session cookies with GraphQL requests, closing the
+  "no built-in way to send cookies with `HttpLink`" gap (closes #7, upstream
+  graphql-flutter#592). `AuthLink` attaches a header the application mints; `CookieLink`
+  carries the cookies the *server* sets, so a login mutation followed by an authenticated
+  query needs no per-request work. Place it before the HTTP link and give it the endpoint it
+  is scoped to: `CookieLink(uri: …).concat(HttpLink(uri))`.
+  - `Credentials` selects the policy — `omit`, `sameOrigin` (the default), `include` — so a
+    cookie set by another origin (an SSO domain) can be opted into, and cookie handling can be
+    switched off entirely.
+  - `CookieStore` is the replaceable seam; `InMemoryCookieStore` implements the RFC 6265
+    subset a client needs: domain and path matching, `Secure`, `Max-Age`/`Expires` (with
+    expiry as deletion) and replacement by name/domain/path. `SameSite` is not modelled — the
+    link is not a browser and has no site context to apply it to.
+  - An explicit `Cookie` header on the request still wins over the store, so a hand-built
+    header remains possible.
+  - Additive: no existing signature, default or export changes.
+  - **Deferred to 6.x:** the `credentials` option on `HttpLink` itself. `UPSTREAM_ISSUES_TRIAGE.md`
+    records why — "a cookie link is additive but the `HttpLink` option is not" — and
+    constitution principle III requires a deferral note rather than a 5.x signature change.
 - **`IsolateStore`** — a `Store` that encodes and persists on a background isolate (closes #9,
   upstream graphql-flutter#424). `HiveStore` encodes every entry and writes it to disk on the
   caller's isolate, so persisting a large cache is CPU work the UI thread pays for. `IsolateStore`
