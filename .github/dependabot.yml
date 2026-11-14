@@ -1,0 +1,15 @@
+# Dependabot for the pub ecosystem, weekly.
+#
+# A melos monorepo: each published package carries its own committed
+# pubspec.lock, which is the reviewed, scannable resolution Dependabot diffs
+# against. `example`/`examples` are fixtures, not published packages.
+version: 2
+updates:
+  - package-ecosystem: "pub"
+    directory: "/packages/graphql_plus"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "pub"
+    directory: "/packages/graphql_flutter_plus"
+    schedule:
+      interval: "weekly"
