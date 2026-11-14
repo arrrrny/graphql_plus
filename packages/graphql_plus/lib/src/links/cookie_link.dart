@@ -76,7 +76,7 @@ class InMemoryCookieStore implements CookieStore {
     if (header == null) return;
 
     final DateTime now = DateTime.now().toUtc();
-    for (final String entry in splitSetCookieHeader(header)) {
+    for (final String entry in _splitSetCookieHeader(header)) {
       final _Cookie? cookie = _Cookie.parse(entry, uri, now);
       if (cookie == null) continue;
       _cookies.removeWhere((_Cookie existing) => existing.replaces(cookie));
@@ -105,7 +105,7 @@ class InMemoryCookieStore implements CookieStore {
 /// `split(',')` would also cut `Expires=Wed, 21 Oct 2037 07:28:00 GMT` in half,
 /// so a comma is only treated as a separator when what follows it starts a new
 /// `name=` pair.
-List<String> splitSetCookieHeader(String header) => header
+List<String> _splitSetCookieHeader(String header) => header
     .split(_cookieSeparator)
     .map((String cookie) => cookie.trim())
     .where((String cookie) => cookie.isNotEmpty)
@@ -206,35 +206,60 @@ class CookieLink extends Link {
   }
 }
 
-/// Parses an IMF-fixdate HTTP date, e.g. `Wed, 21 Oct 2015 07:28:00 GMT`, or the
-/// obsolete RFC 850 / two-digit-year form. The leading weekday name is optional,
-/// and the day may be separated from the month by a space or a dash. Returns
-/// `null` for anything else, which callers treat as "no expiry".
-DateTime? parseHttpDate(String input) {
-  final RegExpMatch? match = _httpDate.firstMatch(input.trim());
-  if (match == null) return null;
+/// Parses an HTTP date in any of the three RFC 6265 §5.1.1 formats:
+/// IMF-fixdate (`Wed, 21 Oct 2015 07:28:00 GMT`), the obsolete RFC 850
+/// two-digit-year form, or asctime (`Sun Nov  6 08:49:37 1994`). The leading
+/// weekday name is optional, and in the first two forms the day may be
+/// separated from the month by a space or a dash. Returns `null` for anything
+/// else, which callers treat as "no expiry".
+DateTime? _parseHttpDate(String input) {
+  final String trimmed = input.trim();
 
-  final int? month = _months[match.group(2)!.toLowerCase()];
-  if (month == null) return null;
+  // IMF-fixdate / RFC 850: day before month, year after the time.
+  final RegExpMatch? match = _httpDate.firstMatch(trimmed);
+  if (match != null) {
+    final int? month = _months[match.group(2)!.toLowerCase()];
+    if (month == null) return null;
+    return DateTime.utc(
+      _httpYear(int.parse(match.group(3)!)),
+      month,
+      int.parse(match.group(1)!),
+      int.parse(match.group(4)!),
+      int.parse(match.group(5)!),
+      int.parse(match.group(6)!),
+    );
+  }
 
-  final int parsedYear = int.parse(match.group(3)!);
-  final int year = parsedYear < 100
-      ? (parsedYear < 70 ? 2000 + parsedYear : 1900 + parsedYear)
-      : parsedYear;
+  // asctime: month before day, year last, the day space-padded to two.
+  final RegExpMatch? asctime = _asctimeDate.firstMatch(trimmed);
+  if (asctime != null) {
+    final int? month = _months[asctime.group(1)!.toLowerCase()];
+    if (month == null) return null;
+    return DateTime.utc(
+      int.parse(asctime.group(6)!),
+      month,
+      int.parse(asctime.group(2)!),
+      int.parse(asctime.group(3)!),
+      int.parse(asctime.group(4)!),
+      int.parse(asctime.group(5)!),
+    );
+  }
 
-  return DateTime.utc(
-    year,
-    month,
-    int.parse(match.group(1)!),
-    int.parse(match.group(4)!),
-    int.parse(match.group(5)!),
-    int.parse(match.group(6)!),
-  );
+  return null;
 }
 
 final RegExp _httpDate = RegExp(
   r'^(?:[A-Za-z]+,\s*)?(\d{1,2})[ -]([A-Za-z]{3})[ -](\d{2,4})[ T](\d{2}):(\d{2}):(\d{2})',
 );
+
+final RegExp _asctimeDate = RegExp(
+  r'^(?:[A-Za-z]+\s+)?([A-Za-z]{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})',
+);
+
+/// Folds a two-digit year into the century RFC 6265 §5.1.1 assumes: `0-69`
+/// means 2000+, `70-99` means 1900+.
+int _httpYear(int parsed) =>
+    parsed < 100 ? (parsed < 70 ? 2000 + parsed : 1900 + parsed) : parsed;
 
 const Map<String, int> _months = <String, int>{
   'jan': 1,
@@ -292,6 +317,7 @@ class _Cookie {
     String domain = requestUri.host.toLowerCase();
     String path = _defaultPath(requestUri.path);
     bool secure = false;
+    bool hasMaxAge = false;
     int? maxAge;
     DateTime? expiresAt;
 
@@ -311,17 +337,34 @@ class _Cookie {
         case 'domain':
           final String candidate =
               raw.toLowerCase().replaceFirst(RegExp(r'^\.+'), '');
-          if (candidate.isNotEmpty) domain = candidate;
+          if (candidate.isNotEmpty) {
+            // RFC 6265 §5.3 step 6: a `Domain` the request host does not
+            // domain-match makes the cookie ignored entirely — otherwise a
+            // response from one origin could plant a cookie for another.
+            if (!_domainMatches(requestUri.host.toLowerCase(), candidate)) {
+              return null;
+            }
+            domain = candidate;
+          }
         case 'path':
           if (raw.startsWith('/')) path = raw;
         case 'secure':
           secure = true;
         case 'max-age':
+          // Presence matters: a `Max-Age` that does not parse as an integer
+          // means the cookie is ignored entirely (RFC 6265 §5.2.2), not a
+          // fall back to `Expires`.
+          hasMaxAge = true;
           maxAge = int.tryParse(raw);
         case 'expires':
-          expiresAt = parseHttpDate(raw);
+          expiresAt = _parseHttpDate(raw);
       }
     }
+
+    // RFC 6265 §5.3 step 10: a `Secure` cookie set over a non-secure channel
+    // is ignored entirely.
+    if (secure && requestUri.scheme != 'https') return null;
+    if (hasMaxAge && maxAge == null) return null;
 
     return _Cookie(
       name: name,
@@ -339,6 +382,14 @@ class _Cookie {
     final DateTime? expiry = expiresAt;
     return expiry != null && !expiry.isAfter(now);
   }
+
+  /// Whether [host] domain-matches [domain] (RFC 6265 §5.1.3): the two are
+  /// equal, or [host] is a subdomain ending in `.` + [domain]. An IP address
+  /// host matches only itself, so the suffix form requires a host name.
+  static bool _domainMatches(String host, String domain) =>
+      host == domain || (host.endsWith('.$domain') && !_ipv4.hasMatch(host));
+
+  static final RegExp _ipv4 = RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$');
 
   /// Whether this cookie is stored under the same name, domain and path as
   /// [other] — the identity RFC 6265 replaces on.

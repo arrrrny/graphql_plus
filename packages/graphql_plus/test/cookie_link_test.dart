@@ -322,6 +322,155 @@ void main() {
       expect(server.seenCookie, [isNull, 'session=abc']);
     });
   });
+
+  group('InMemoryCookieStore', () {
+    test('sends a Domain cookie to subdomains of the attribute', () {
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('https://api.example.com/graphql'),
+          const {'set-cookie': 's=1; Domain=example.com; Path=/'},
+        );
+
+      expect(
+        store.cookieHeaderFor(Uri.parse('https://sub.example.com/graphql')),
+        's=1',
+      );
+      expect(
+        store.cookieHeaderFor(Uri.parse('https://api.example.com/graphql')),
+        's=1',
+      );
+    });
+
+    test('ignores a Domain cookie the request host does not domain-match', () {
+      // RFC 6265 §5.3 step 6: a response cannot plant a cookie for another
+      // domain, so the jar stays empty for the planting origin too.
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('https://api.example.com/graphql'),
+          const {'set-cookie': 'pwn=1; Domain=evil.com; Path=/'},
+        );
+
+      expect(
+        store.cookieHeaderFor(Uri.parse('https://api.example.com/graphql')),
+        isNull,
+      );
+      expect(store.cookieHeaderFor(Uri.parse('https://evil.com/')), isNull);
+    });
+
+    test('matches a path and its children, not a sibling that extends it', () {
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/graphql'),
+          const {'set-cookie': 's=1; Path=/foo'},
+        );
+
+      expect(store.cookieHeaderFor(Uri.parse('https://h.example/foo')), 's=1');
+      expect(
+        store.cookieHeaderFor(Uri.parse('https://h.example/foo/bar')),
+        's=1',
+      );
+      expect(
+          store.cookieHeaderFor(Uri.parse('https://h.example/foobar')), isNull);
+    });
+
+    test('evicts the oldest cookies beyond capacity', () {
+      // One comma-joined header, the way `package:http` delivers several
+      // `Set-Cookie` headers.
+      final store = InMemoryCookieStore(capacity: 2)
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {'set-cookie': 'a=1; Path=/, b=2; Path=/, c=3; Path=/'},
+        );
+
+      final header = store.cookieHeaderFor(Uri.parse('https://h.example/'));
+      expect(header, isNot(contains('a=')));
+      expect(header, contains('b=2'));
+      expect(header, contains('c=3'));
+    });
+
+    test('folds an RFC 850 two-digit-year Expires by RFC 6265 rules', () {
+      // RFC 6265 §5.1.1: 00-69 means 2000+, 70-99 means 1900+ — so an `68`
+      // date is in the future while a `94` one is long past (a deletion).
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {
+            'set-cookie':
+                'kept=1; Expires=Sunday, 06-Nov-68 08:49:37 GMT; Path=/',
+          },
+        )
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {
+            'set-cookie':
+                'gone=2; Expires=Sunday, 06-Nov-94 08:49:37 GMT; Path=/',
+          },
+        );
+
+      expect(store.cookieHeaderFor(Uri.parse('https://h.example/')), 'kept=1');
+    });
+
+    test('parses an asctime Expires date', () {
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {
+            'set-cookie': 'kept=1; Expires=Sun Nov  6 08:49:37 2037; Path=/',
+          },
+        )
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {
+            'set-cookie': 'gone=2; Expires=Sun Nov  6 08:49:37 1994; Path=/',
+          },
+        );
+
+      // The past-date cookie is expired at set time, so it is a deletion
+      // request, not a record.
+      expect(store.cookieHeaderFor(Uri.parse('https://h.example/')), 'kept=1');
+    });
+
+    test('ignores a cookie whose Max-Age does not parse', () {
+      // RFC 6265 §5.2.2: a present-but-unparseable `Max-Age` means ignore the
+      // cookie entirely, not a fall back to `Expires`.
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {
+            'set-cookie':
+                'a=1; Max-Age=abc; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/',
+          },
+        );
+
+      expect(store.cookieHeaderFor(Uri.parse('https://h.example/')), isNull);
+    });
+
+    test('does not store a Secure cookie set over http', () {
+      // RFC 6265 §5.3 step 10: ignored at set time, so it never reaches even
+      // an https request through the store.
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('http://h.example/'),
+          const {'set-cookie': 's=1; Secure; Path=/'},
+        );
+
+      expect(store.cookieHeaderFor(Uri.parse('https://h.example/')), isNull);
+    });
+
+    test('ignores a cookie with a malformed name', () {
+      final store = InMemoryCookieStore()
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {'set-cookie': 'p wn=1; Path=/'},
+        )
+        ..addCookiesFromResponse(
+          Uri.parse('https://h.example/'),
+          const {'set-cookie': '=2; Path=/'},
+        );
+
+      expect(store.cookieHeaderFor(Uri.parse('https://h.example/')), isNull);
+    });
+  });
 }
 
 /// A store holding one cookie that belongs to `sso.example`, not to the test
