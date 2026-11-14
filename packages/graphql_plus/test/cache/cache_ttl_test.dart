@@ -141,6 +141,43 @@ void main() {
       clock.advance(const Duration(seconds: 11));
       expect(cache.readNormalized('User:1'), isNull);
     });
+
+    test('a write to an expired entity is not dropped by the sweep', () {
+      final clock = _FakeClock();
+      final cache = GraphQLCache(
+        store: InMemoryStore(),
+        defaultTtl: const Duration(seconds: 30),
+        clock: clock.call,
+      );
+
+      cache.writeNormalized('User:1', {'name': 'Ada'});
+      clock.advance(const Duration(seconds: 31));
+      cache.writeNormalized('User:1', {'name': 'Grace'});
+
+      // the expired entity is dropped before the merge, so the fresh write
+      // is stored instead of being swept away right after the put
+      expect(cache.store.toMap()['User:1'], {'name': 'Grace'});
+      expect(cache.readNormalized('User:1'), {'name': 'Grace'});
+    });
+
+    test('a top-level read sweeps entities that nothing has read', () {
+      final clock = _FakeClock();
+      final cache = GraphQLCache(
+        store: InMemoryStore(),
+        defaultTtl: const Duration(seconds: 30),
+        clock: clock.call,
+      );
+
+      cache.writeNormalized('User:1', {'name': 'Ada'});
+      cache.writeNormalized('User:2', {'name': 'Grace'});
+      clock.advance(const Duration(seconds: 31));
+
+      // neither entity was ever read; the sweep on the next top-level read
+      // is what reclaims them
+      cache.readQuery(_viewerRequest());
+
+      expect(cache.store.toMap(), isEmpty);
+    });
   });
 
   group('GraphQLCache manual invalidation and eviction', () {
@@ -210,6 +247,25 @@ void main() {
       cache.writeNormalized('User:2', {'name': 'Grace'});
       expect(cache.store.toMap().keys, unorderedEquals(['User:1', 'User:2']));
     });
+
+    test('evicting an entity drops its TTL override', () {
+      final clock = _FakeClock();
+      final cache = GraphQLCache(
+        store: InMemoryStore(),
+        defaultTtl: const Duration(seconds: 30),
+        clock: clock.call,
+      );
+
+      cache.writeNormalized('User:1', {'name': 'Ada'});
+      cache.setTtl('User:1', const Duration(hours: 1));
+      cache.evict('User:1');
+
+      // the override belongs to the entity: the fresh write is aged by the
+      // default TTL again, not by the stale per-entity override
+      cache.writeNormalized('User:1', {'name': 'Grace'});
+      clock.advance(const Duration(seconds: 31));
+      expect(cache.readNormalized('User:1'), isNull);
+    });
   });
 
   group('GraphQLCache size limits', () {
@@ -243,6 +299,33 @@ void main() {
       expect(cache.store.toMap().keys, unorderedEquals(['User:2']));
     });
 
+    test('maxSizeBytes accounts the merged entity, not the incoming fragment',
+        () {
+      final cache = GraphQLCache(store: InMemoryStore(), maxSizeBytes: 45);
+
+      // typed <String, Object> so the write takes the deep-merge branch
+      cache.writeNormalized('User:1', <String, Object>{'name': 'aaaaaaaaaa'});
+      cache.writeNormalized('User:2', <String, Object>{'name': 'bbbbbbbbbb'});
+      expect(cache.store.toMap().keys, unorderedEquals(['User:1', 'User:2']));
+
+      // the fragment alone is 20 bytes, but merged into User:1 the stored
+      // entity is 40 — the budget is enforced against the stored size
+      cache.writeNormalized('User:1', <String, Object>{'age': 'cccccccccc'});
+
+      expect(cache.store.toMap().keys, unorderedEquals(['User:1']));
+    });
+
+    test('maxSizeBytes counts UTF-8 bytes, not UTF-16 code units', () {
+      final cache = GraphQLCache(store: InMemoryStore(), maxSizeBytes: 50);
+
+      // 12 'ş' are 12 UTF-16 code units but 24 UTF-8 bytes, so the entity
+      // is 35 bytes on the wire, not 21
+      cache.writeNormalized('User:1', {'name': 'şşşşşşşşşşşş'});
+      cache.writeNormalized('User:2', {'name': 'aaaaaaaaaa'});
+
+      expect(cache.store.toMap().keys, unorderedEquals(['User:2']));
+    });
+
     test('invalidate keeps the size budget honest for an untracked entry', () {
       final cache = GraphQLCache(store: InMemoryStore(), maxSizeBytes: 24);
 
@@ -256,6 +339,25 @@ void main() {
       cache.writeNormalized('User:2', {'name': 'bbbbbbbbbb'});
 
       expect(cache.store.toMap().keys, unorderedEquals(['User:2']));
+    });
+  });
+
+  group('GraphQLCache constructor validation', () {
+    test('non-positive limits throw in release builds too', () {
+      // validated in the constructor body, not with `assert`, so the check
+      // survives AOT — a negative maxEntries would hang _enforceLimits
+      expect(
+        () => GraphQLCache(store: InMemoryStore(), maxEntries: 0),
+        throwsArgumentError,
+      );
+      expect(
+        () => GraphQLCache(store: InMemoryStore(), maxEntries: -1),
+        throwsArgumentError,
+      );
+      expect(
+        () => GraphQLCache(store: InMemoryStore(), maxSizeBytes: 0),
+        throwsArgumentError,
+      );
     });
   });
 }

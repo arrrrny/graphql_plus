@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:collection/collection.dart' show IterableExtension;
+import 'package:gql_exec/gql_exec.dart' show Request;
 import 'package:graphql_plus/src/cache/_normalizing_data_proxy.dart';
+import 'package:graphql_plus/src/cache/fragment.dart' show FragmentRequest;
 import 'package:meta/meta.dart';
 
 import 'package:graphql_plus/src/utilities/helpers.dart';
@@ -45,13 +47,21 @@ class GraphQLCache extends NormalizingDataProxy {
   })  : sanitizeVariables = variableSanitizer(sanitizeVariables),
         store = store ?? InMemoryStore(),
         _clock = clock ?? DateTime.now {
+    // Validated in the body, not with `assert`: asserts are compiled out of
+    // release builds, and a non-positive limit makes `_enforceLimits` loop
+    // forever there.
     final entryLimit = maxEntries;
-    assert(entryLimit == null || entryLimit > 0, 'maxEntries must be positive');
+    if (entryLimit != null && entryLimit <= 0) {
+      throw ArgumentError.value(entryLimit, 'maxEntries', 'must be positive');
+    }
     final sizeLimit = maxSizeBytes;
-    assert(
-      sizeLimit == null || sizeLimit > 0,
-      'maxSizeBytes must be positive',
-    );
+    if (sizeLimit != null && sizeLimit <= 0) {
+      throw ArgumentError.value(
+        sizeLimit,
+        'maxSizeBytes',
+        'must be positive',
+      );
+    }
   }
 
   /// Stores the underlying normalized data. Defaults to an [InMemoryStore]
@@ -97,7 +107,9 @@ class GraphQLCache extends NormalizingDataProxy {
   ///
   /// An id absent from this map is an entity with no expiry and no size
   /// accounting - which is the state of every cache that configures neither
-  /// [defaultTtl]/[typeTtl] nor [maxSizeBytes], so those caches pay nothing.
+  /// [defaultTtl]/[typeTtl] nor [maxEntries]/[maxSizeBytes], so those caches
+  /// pay nothing: [_recordWrite] records nothing, and the sweep, the touch
+  /// and the limit enforcement are no-ops on an empty map.
   final Map<String, _CacheEntry> _entries = {};
 
   /// Per-entity TTL overrides written through [setTtl].
@@ -105,6 +117,15 @@ class GraphQLCache extends NormalizingDataProxy {
 
   /// Running total of [_CacheEntry.size], for [maxSizeBytes].
   int _trackedSize = 0;
+
+  /// Whether any TTL or size feature is configured and writes must keep
+  /// [_entries] bookkeeping at all.
+  bool get _tracksEntries =>
+      defaultTtl != null ||
+      typeTtl.isNotEmpty ||
+      _ttlOverrides.isNotEmpty ||
+      maxEntries != null ||
+      maxSizeBytes != null;
 
   /// Determines how partial data should be handled when written to the cache
   ///
@@ -169,11 +190,13 @@ class GraphQLCache extends NormalizingDataProxy {
 
   /// Reads dereferences an entity from the first valid optimistic layer,
   /// defaulting to the base internal HashMap.
+  ///
+  /// Expiry is checked for the requested id only; the sweep over every entry
+  /// runs once per top-level operation, in [readQuery]/[readFragment].
   Map<String, dynamic>? readNormalized(
     String rootId, {
     bool? optimistic = true,
   }) {
-    _sweepExpired();
     if (_isExpired(_entries[rootId])) {
       _remove(rootId);
     } else {
@@ -210,18 +233,58 @@ class GraphQLCache extends NormalizingDataProxy {
   ///
   /// Called from [writeQuery] and [writeFragment].
   void writeNormalized(String dataId, Map<String, dynamic>? value) {
-    if (value is Map<String, Object>) {
-      final existing = store.get(dataId);
-      store.put(
-        dataId,
-        existing != null ? deeplyMergeLeft([existing, value]) : value,
-      );
-    } else {
-      store.put(dataId, value);
+    // An expired entity must not survive into a fresh write: drop it before
+    // the merge, so the stale value is not carried into the new one and a
+    // sweep cannot delete the value this write just stored.
+    if (_isExpired(_entries[dataId])) {
+      _remove(dataId);
     }
-    _sweepExpired();
-    _recordWrite(dataId, value);
+    final existing = store.get(dataId);
+    final stored = (value is Map<String, Object> && existing != null)
+        ? deeplyMergeLeft([existing, value])
+        : value;
+    store.put(dataId, stored);
+    _recordWrite(dataId, stored);
     _enforceLimits();
+  }
+
+  /// The per-entity expiry check in [readNormalized]/[writeNormalized] is
+  /// O(1); the sweep over every entry runs here, once per top-level
+  /// operation, so denormalizing a query that touches K entities does not
+  /// run K full sweeps.
+  @override
+  Map<String, dynamic>? readQuery(Request request, {bool optimistic = true}) {
+    _sweepExpired();
+    return super.readQuery(request, optimistic: optimistic);
+  }
+
+  @override
+  Map<String, dynamic>? readFragment(
+    FragmentRequest fragmentRequest, {
+    bool optimistic = true,
+  }) {
+    _sweepExpired();
+    return super.readFragment(fragmentRequest, optimistic: optimistic);
+  }
+
+  @override
+  void writeQuery(
+    Request request, {
+    required Map<String, dynamic> data,
+    bool? broadcast = true,
+  }) {
+    _sweepExpired();
+    super.writeQuery(request, data: data, broadcast: broadcast);
+  }
+
+  @override
+  void writeFragment(
+    FragmentRequest fragmentRequest, {
+    required Map<String, dynamic> data,
+    bool? broadcast = true,
+  }) {
+    _sweepExpired();
+    super.writeFragment(fragmentRequest, data: data, broadcast: broadcast);
   }
 
   /// Manually evict the entity stored under [dataId] and request a rebroadcast.
@@ -367,6 +430,11 @@ class GraphQLCache extends NormalizingDataProxy {
   /// Record the write of [value] under [dataId], replacing any earlier
   /// bookkeeping for it.
   void _recordWrite(String dataId, Map<String, dynamic>? value) {
+    if (!_tracksEntries) {
+      // No TTL and no size limit is configured: keep [_entries] empty so the
+      // cache pays nothing for its bookkeeping (see the [_entries] docs).
+      return;
+    }
     final previous = _entries.remove(dataId);
     if (previous != null) {
       _trackedSize -= previous.size;
@@ -424,6 +492,10 @@ class GraphQLCache extends NormalizingDataProxy {
     if (entry != null) {
       _trackedSize -= entry.size;
     }
+    // The override belongs to the entity: once it is gone (evicted, expired,
+    // removed), a stale override would leak here forever and silently apply
+    // to a future entity written under the same id.
+    _ttlOverrides.remove(dataId);
     final existed = store.get(dataId) != null || entry != null;
     store.delete(dataId);
     return existed;
@@ -436,7 +508,9 @@ class GraphQLCache extends NormalizingDataProxy {
   /// is accounted as taking no space rather than failing the write.
   static int _estimateSize(Map<String, dynamic> value) {
     try {
-      return jsonEncode(value).length;
+      // UTF-8 bytes, not UTF-16 code units: for non-ASCII data (accents,
+      // emoji) the byte length is what the memory budget actually bounds.
+      return utf8.encode(jsonEncode(value)).length;
     } on Object {
       return 0;
     }
