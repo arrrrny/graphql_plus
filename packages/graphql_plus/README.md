@@ -1157,7 +1157,6 @@ final right = OfflineMutationLink(
 See [specs/005-offline-mutation-queue/spec.md](../../specs/005-offline-mutation-queue/spec.md)
 for the requirements.
 
-
 ### AWS AppSync Support
 
 **Cognito Pools**
