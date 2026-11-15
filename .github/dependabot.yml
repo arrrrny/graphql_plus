@@ -1,15 +1,29 @@
 # Dependabot for the pub ecosystem, weekly.
 #
-# A melos monorepo: each published package carries its own committed
-# pubspec.lock, which is the reviewed, scannable resolution Dependabot diffs
-# against. `example`/`examples` are fixtures, not published packages.
+# A melos monorepo: one entry per published package. This repo does not
+# track lockfiles (.gitignore ignores pubspec.lock), so Dependabot resolves
+# version updates from each package's pubspec.yaml constraints.
+# `example`/`examples` are fixtures, not published packages.
+#
+# The gql_* family moves in lockstep, so it is grouped into one PR instead of
+# one PR per sibling package; open-pull-requests-limit caps the rest.
 version: 2
 updates:
   - package-ecosystem: "pub"
     directory: "/packages/graphql_plus"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      gql:
+        patterns:
+          - "gql*"
   - package-ecosystem: "pub"
     directory: "/packages/graphql_flutter_plus"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      gql:
+        patterns:
+          - "gql*"
