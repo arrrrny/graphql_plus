@@ -152,6 +152,32 @@ AppSyncJwtAuth countingJwtProvider(List<String> issued) =>
       return token;
     });
 
+/// A JWT provider whose *connection* authorization succeeds but whose
+/// per-message authorization throws for the first [remainingFailures]
+/// registrations — a Cognito refresh dying in the window between the
+/// websocket upgrade and the start message.
+///
+/// A provider that fails `authorization()` outright never reaches the
+/// per-message path: the connection handshake fails first and the failure
+/// is onConnectionLost's domain. This one isolates the serialization
+/// failure the socket client must surface on the response stream.
+class FlakyOperationJwtAuth extends AppSyncJwtAuth {
+  FlakyOperationJwtAuth(this.remainingFailures) : super(() => 'token-ok');
+
+  int remainingFailures;
+
+  @override
+  FutureOr<Map<String, String>> authorizationForOperation(
+    String serializedOperation,
+  ) {
+    if (remainingFailures > 0) {
+      remainingFailures--;
+      throw StateError('refresh failed');
+    }
+    return super.authorizationForOperation(serializedOperation);
+  }
+}
+
 Request subscriptionRequest() => Request(
       operation: Operation(
         document: gql('subscription MockSub { mocked }'),
@@ -174,6 +200,18 @@ void main() {
       expect(
         appSyncRealtimeEndpoint('https://api.example.com/graphql'),
         'wss://api.example.com/graphql/realtime',
+      );
+    });
+
+    test('appends /realtime to a custom domain that merely contains '
+        'appsync-api', () {
+      // Dot-anchoring: the substring heuristic would rewrite this host to
+      // the non-existent myappsync-realtime-api.corp.example.com.
+      expect(
+        appSyncRealtimeEndpoint(
+          'https://myappsync-api.corp.example.com/graphql',
+        ),
+        'wss://myappsync-api.corp.example.com/graphql/realtime',
       );
     });
 
@@ -446,6 +484,44 @@ void main() {
       final acceptedAuth =
           decodedConnectionAuth(server.connectionRequests.last);
       expect(acceptedAuth['header']['Authorization'], isNot('token-1'));
+
+      await subscription.cancel();
+      await link.dispose();
+    });
+
+    test('surfaces a failing auth provider on the response stream instead of '
+        'hanging, and retries on reconnect', () async {
+      final link = AppSyncWebSocketLink(
+        server.url,
+        authProvider: FlakyOperationJwtAuth(1),
+        delayBetweenReconnectionAttempts: const Duration(milliseconds: 1),
+      );
+
+      final responses = link.request(subscriptionRequest());
+      final received = <Response>[];
+      final errors = <Object>[];
+      final subscription = responses.listen(received.add, onError: errors.add);
+
+      // The connection handshake succeeds (the provider only fails
+      // per-message), so the serialization failure must surface on the
+      // response stream instead of hanging the subscription.
+      await waitForCondition(
+        () => errors.isNotEmpty,
+        message: 'the serialization failure did not surface on the stream',
+      );
+      expect(errors.first, isA<StateError>());
+      expect((errors.first as StateError).message, 'refresh failed');
+
+      // Deliberate aftermath: the stream stays open after the error, and a
+      // reconnect — which resets the initializer — retries the registration.
+      // With the provider recovered the subscription goes live; a transient
+      // refresh failure is recoverable rather than terminal.
+      server.forceCloseSockets();
+      await waitForCondition(
+        () => received.isNotEmpty,
+        message: 'the subscription did not recover after the reconnect',
+      );
+      expect(received.first.data, {'mocked': true});
 
       await subscription.cancel();
       await link.dispose();

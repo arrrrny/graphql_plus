@@ -787,6 +787,12 @@ class SocketClient {
           // must not race a second connected-state event into a duplicate
           // start message.
           _subscriptionInitializers[id]!.hasBeenTriggered = true;
+          // The socket identity acts as a connection epoch: a disconnect
+          // while the serialization below is in flight (a Cognito refresh
+          // can take hundreds of ms) resets the initializer and re-triggers
+          // it on the new connection, so this resumed attempt must not also
+          // write a second start with the same id.
+          final channelAtClaim = socketChannel;
           try {
             final serialized = await serializeRequest(payload);
             GraphQLSocketMessage operation;
@@ -801,11 +807,21 @@ class SocketClient {
                 serialized,
               );
             }
-            _write(operation);
+            // A connection-state check is not enough here: by resume time
+            // the replacement connection is connected again, which is why
+            // _write's own check does not already prevent the duplicate.
+            if (identical(socketChannel, channelAtClaim)) {
+              _write(operation);
+            }
+            // else: the connection was replaced mid-serialization; the
+            // re-triggered initializer sends it with fresh auth.
           } catch (e, stackTrace) {
             // A failing serialization (e.g. an authorization provider that
             // cannot produce a token) must surface on the response stream
-            // instead of vanishing into the zone.
+            // instead of vanishing into the zone. The stream is deliberately
+            // left open afterwards: a later reconnect resets the initializer
+            // and retries with fresh auth, so a transient refresh failure is
+            // recoverable. Closing here would make the failure terminal.
             response.addError(e, stackTrace);
           }
         }

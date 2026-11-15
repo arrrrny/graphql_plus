@@ -161,7 +161,11 @@ class AppSyncRequestSerializer {
 String appSyncRealtimeEndpoint(String graphqlEndpoint) {
   final uri = Uri.parse(graphqlEndpoint);
   final scheme = uri.scheme == 'http' ? 'ws' : 'wss';
-  if (uri.host.contains('appsync-api')) {
+  // Dot-anchored: a host that merely contains `appsync-api` (a custom domain
+  // like `myappsync-api.corp.example.com`) is not a standard endpoint and
+  // keeps its host, getting `/realtime` appended instead of a rewrite to a
+  // non-existent `…-realtime-api…` domain.
+  if (uri.host.contains('.appsync-api.')) {
     return uri
         .replace(
           scheme: scheme,
