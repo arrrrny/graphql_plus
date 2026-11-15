@@ -71,10 +71,12 @@ client_latest="1.0.0"
 [ -e "$STATE/client-published" ] && client_latest="$CLIENT_VERSION"
 flutter_latest="1.0.0"
 [ -e "$STATE/flutter-published" ] && flutter_latest="$FLUTTER_VERSION"
+# The script reads pub.dev fail-closed (`curl -w '\n%{http_code}'`): it needs
+# the JSON body AND the status line, so emit both — the fake API answers 200.
 if [ "$name" = "client" ]; then
-  echo "{\"latest\":{\"version\":\"$client_latest\"}}"
+  printf '{"latest":{"version":"%s"}}\n200\n' "$client_latest"
 else
-  echo "{\"latest\":{\"version\":\"$flutter_latest\"}}"
+  printf '{"latest":{"version":"%s"}}\n200\n' "$flutter_latest"
 fi
 EOF
   # dart: records invocations; `pub publish --force` marks the client shipped;

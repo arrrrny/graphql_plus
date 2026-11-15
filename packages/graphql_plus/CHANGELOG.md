@@ -1,6 +1,33 @@
 # v5.3.0
 
 ## Added
+- **`DioLink`** — a terminating link that executes operations over HTTP with
+  [dio](https://pub.dev/packages/dio) (closes #13, upstream graphql-flutter#712).
+  `HttpLink` sends through `package:http`, which leaves an app that already uses
+  dio for REST with two HTTP stacks, two interceptor chains and two cookie jars.
+  `DioLink` takes the application's own `Dio` and sends GraphQL through it, so an
+  auth-refresh interceptor, a logging interceptor, a timeout policy or a cookie
+  manager written once applies to both.
+  - Behaviour is `HttpLink`'s: the same request and response encoding, the same
+    `HttpLinkServerException` on a non-2xx status or a response missing both
+    `data` and `errors`, and the same `HttpLinkParserException` on a body that
+    will not parse — the transport is a construction-time choice and no
+    downstream error handling changes.
+  - `useGETForQueries`, `defaultHeaders`, `serializer`, `parser` and the
+    per-request `HttpLinkHeaders` behave as they do on `HttpLink`;
+    `responseDecoder` replaces `httpResponseDecoder` for a body that needs a
+    transformation (a decrypted envelope) before it is parsed.
+  - A `CancellationToken` in the request context becomes the request's
+    `CancelToken`, so cancellation surfaces as a `CancelledException`, exactly as
+    `CancellableHttpLink` does.
+  - File uploads take the same `http.MultipartFile` variables and send the same
+    GraphQL multipart request (`operations`, `map`, one part per file), so upload
+    code does not change with the transport.
+  - A `Dio` the link did not create is never closed by it, so the shared
+    interceptor chain outlives the link.
+  - Additive: no existing signature, default or export changes. `dio` is a new
+    runtime dependency of `graphql`, and a dependency the package did not carry
+    before.
 - **`CookieLink`** — a link that carries session cookies with GraphQL requests, closing the
   "no built-in way to send cookies with `HttpLink`" gap (closes #7, upstream
   graphql-flutter#592). `AuthLink` attaches a header the application mints; `CookieLink`

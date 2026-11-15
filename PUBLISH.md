@@ -20,8 +20,11 @@ first and the flutter package follows once the client is live.
 ```
 
 The environment argument is `development | staging | production`. pub.dev is a
-single registry, so the tier selects no target and is echoed to the release log;
-`development` is the dry run.
+single registry, so the tier selects no target — `development` is the dry run.
+`staging` and `production` both publish for real, and the tier is written into
+the release evidence: the footer of both GitHub release bodies and the tag
+annotation both name it, so a `staging` publish and a `production` publish stay
+distinguishable after the fact.
 
 The script refuses to run unless:
 
@@ -37,11 +40,17 @@ The script refuses to run unless:
   `CREDENTIAL_JSON` rather than tagging a release nothing would ship; only an
   unreadable secrets API (no repo admin) downgrades that to a warning that
   needs `--yes`.
+- neither version is already on pub.dev. That check does not guess: a version
+  that is live aborts the run, and so does an unreadable answer from pub.dev —
+  a network blip is never read as "first publish", because the next step is a
+  tag that cannot be un-cut.
 
 It then tags `graphql_plus-v<client>` and `graphql_flutter_plus-v<flutter>`,
-creates the matching GitHub releases (whose notes are the changelog section),
-waits for `graphql_plus` to appear on pub.dev, and only then publishes
-`graphql_flutter_plus`. It ends by reading both versions back from pub.dev.
+creates the matching GitHub releases (whose notes are the changelog section plus
+a footer naming the branch, commit and environment, and whose tag annotation
+names the environment), waits for `graphql_plus` to appear on pub.dev, and only
+then publishes `graphql_flutter_plus`. It ends by reading both versions back
+from pub.dev.
 
 The confirmation prompt needs a TTY. The pool's publish lane runs from a `/tmp`
 clone with no terminal, so its real invocation is the `--yes` form:
