@@ -17,6 +17,10 @@
 #                   <environment> = development.
 #   --local         publish from this machine instead of through the GitHub
 #                   release workflows. Needs a pub.dev credential (below).
+#                   Resumable: if the client version is already on pub.dev, its
+#                   publish is skipped and the run continues with the flutter
+#                   package — that is how a run that died after the client
+#                   shipped is finished.
 #   --yes           do not ask for confirmation before the irreversible step.
 #
 # The publish order matters: graphql_flutter_plus depends on graphql_plus, and
@@ -52,6 +56,7 @@ ENVIRONMENT=""
 DRY_RUN=0
 LOCAL=0
 ASSUME_YES=0
+SKIP_CLIENT_PUBLISH=0
 
 die() { echo "release: $*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -93,10 +98,43 @@ changelog_notes() {
   ' "$changelog"
 }
 
+# pub.dev's API `latest` field flips the moment an upload is ACCEPTED — before
+# the version is resolvable by pub get (indexing/archive lag; the upload
+# message itself warns it may take up to 10 minutes). A wait keyed on it makes
+# the next step race a version pub cannot serve yet: the flutter publish died
+# exactly that way, on "version solving failed" (issue #41). The one readiness
+# signal that cannot lie is resolution against the registry itself, so poll a
+# throwaway package whose only dependency is the version being waited for,
+# until pub get succeeds.
+wait_for_resolvable() {
+  local name="$1" version="$2" scratch deadline
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/graphql-plus-resolve.XXXXXX")"
+  cat >"$scratch/pubspec.yaml" <<EOF
+name: release_resolvability_probe
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  $name: ^$version
+EOF
+  step "Wait for $name $version to be resolvable on pub.dev"
+  deadline=$((SECONDS + PUBLISH_WAIT_SECONDS))
+  until (cd "$scratch" && dart pub get >/dev/null 2>&1); do
+    # The deadline path must clean the scratch like the success path: die
+    # exits from inside the loop and would strand the probe package (with
+    # its .dart_tool once a real pub get ran) in $TMPDIR.
+    [ "$SECONDS" -lt "$deadline" ] || {
+      rm -rf "$scratch"
+      die "$name $version did not become resolvable on pub.dev within ${PUBLISH_WAIT_SECONDS}s — pub get keeps failing on ^$version (check https://pub.dev/packages/$name/versions)"
+    }
+    sleep 10
+  done
+  rm -rf "$scratch"
+  echo "$name $version is resolvable"
+}
+
 # Extract the `latest` version from a pub.dev package-API JSON body (stdin).
-# One copy of the regex, shared by the fail-closed reader below and the two
-# fail-open wait loops: a transient 5xx mid-wait must retry, so those callers
-# pipe the raw body through this rather than the reader (which aborts the run).
+# One copy of the regex, shared by the fail-closed reader below: a transient
+# 5xx there must abort the run, so the reader does not just retry on it.
 pub_dev_extract_version() {
   sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p'
 }
@@ -189,7 +227,19 @@ echo "mode            : $([ "$DRY_RUN" = 1 ] && echo 'dry run (nothing is publis
 # pub.dev is immutable: a version that already exists cannot be re-cut, and the
 # whole point of a re-run is to finish one that died half way.
 if [ "$DRY_RUN" = 0 ]; then
-  require_not_published "$CLIENT_NAME" "$CLIENT_VERSION"
+  # The precheck must stay fail-closed (a network blip is never a first
+  # publish), but pub.dev is immutable, so an already-live client version is
+  # not always a stop: a --local re-run after a death half way through must
+  # reach the flutter publish, so it is a skip-and-continue point there, not a
+  # failure (#41).
+  client_live="$(pub_dev_latest_version "$CLIENT_NAME")" ||
+    die "could not read $CLIENT_NAME from pub.dev — refusing to tag a release for a version that may already be live. Check the connection and re-run."
+  if [ "$LOCAL" = 1 ] && [ "$client_live" = "$CLIENT_VERSION" ]; then
+    echo "note: $CLIENT_NAME $CLIENT_VERSION is already on pub.dev — skipping its publish and resuming with $FLUTTER_NAME $FLUTTER_VERSION"
+    SKIP_CLIENT_PUBLISH=1
+  else
+    require_not_published "$CLIENT_NAME" "$CLIENT_VERSION"
+  fi
   require_not_published "$FLUTTER_NAME" "$FLUTTER_VERSION"
 fi
 
@@ -363,16 +413,9 @@ if [ "$LOCAL" = 0 ]; then
   echo "released $CLIENT_TAG — Release (dart) is publishing $CLIENT_NAME"
 
   # The flutter package's constraint must resolve on pub.dev before it can be
-  # published, so wait for the client to be live rather than racing the workflow.
-  step "Wait for $CLIENT_NAME $CLIENT_VERSION on pub.dev"
-  deadline=$((SECONDS + PUBLISH_WAIT_SECONDS))
-  until [ "$(curl -sf --max-time 20 "https://pub.dev/api/packages/$CLIENT_NAME" |
-    pub_dev_extract_version)" = "$CLIENT_VERSION" ]; do
-    [ "$SECONDS" -lt "$deadline" ] ||
-      die "$CLIENT_NAME $CLIENT_VERSION did not appear on pub.dev within ${PUBLISH_WAIT_SECONDS}s — check the Release (dart) run: gh run list --workflow 'Release (dart)'"
-    sleep 15
-  done
-  echo "$CLIENT_NAME $CLIENT_VERSION is live"
+  # published, so wait until the client is RESOLVABLE rather than racing the
+  # workflow (the API `latest` field flips before pub can serve the version).
+  wait_for_resolvable "$CLIENT_NAME" "$CLIENT_VERSION"
 
   # Now that the client is on pub.dev, the flutter package can be validated for
   # real — against the registry constraint it will actually publish under, not
@@ -403,15 +446,14 @@ else
   # --local creates neither, so without this a `staging --local` and a
   # `production --local` are indistinguishable after the fact. Print it here.
   echo "environment: $ENVIRONMENT — branch: $BRANCH — commit: $LOCAL_HEAD"
-  (cd "$CLIENT_DIR" && dart pub publish --force)
-  step "Wait for $CLIENT_NAME $CLIENT_VERSION on pub.dev"
-  deadline=$((SECONDS + PUBLISH_WAIT_SECONDS))
-  until [ "$(curl -sf --max-time 20 "https://pub.dev/api/packages/$CLIENT_NAME" |
-    pub_dev_extract_version)" = "$CLIENT_VERSION" ]; do
-    [ "$SECONDS" -lt "$deadline" ] ||
-      die "$CLIENT_NAME $CLIENT_VERSION did not appear on pub.dev within ${PUBLISH_WAIT_SECONDS}s"
-    sleep 10
-  done
+  if [ "$SKIP_CLIENT_PUBLISH" = 1 ]; then
+    echo "$CLIENT_NAME $CLIENT_VERSION is already on pub.dev — skipping its publish"
+  else
+    (cd "$CLIENT_DIR" && dart pub publish --force)
+  fi
+  # pub.dev may accept the upload long before it serves the version, so hold
+  # the flutter publish until the client actually resolves (#41).
+  wait_for_resolvable "$CLIENT_NAME" "$CLIENT_VERSION"
   (cd "$FLUTTER_DIR" && flutter pub publish --dry-run)
   (cd "$FLUTTER_DIR" && flutter pub publish --force)
 fi
