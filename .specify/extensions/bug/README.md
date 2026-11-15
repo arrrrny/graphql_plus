@@ -6,7 +6,7 @@ An end-to-end bug triage workflow for Spec Kit: assess, report (GitHub issue), f
 
 This extension delivers an opinionated, repeatable bug workflow that any AI coding agent can drive:
 
-1. **Assess** — read a bug report (pasted text or a URL), judge whether it is a real bug, locate suspected code paths, and propose a remediation. `assess` writes a *local* assessment only; it does **not** file a GitHub issue.
+1. **Assess** — read a bug report (pasted text or a URL), judge whether it is a real bug, locate suspected code paths, and propose a remediation. `assess` writes a *local* assessment only; it does **not** file a GitHub issue unless `--issue` (or the `auto_create_issue` config) opts in.
 2. **Load** (alternative entry point) — `speckit.bug.fetch` pulls an *existing* GitHub issue (by number, URL, or `owner/repo#n`) via `gh`, records it as `issue.md`, and seeds an `assessment.md` draft. Use this when the bug is already tracked on GitHub and you want to triage and fix it here — instead of starting from a pasted report.
 3. **Report** (optional) — `speckit.bug.issue` turns an assessment into a tracked GitHub issue via `gh`, recording the issue link. `assess` can auto-trigger this with `--issue` or the `auto_create_issue` config. `fetch` already produces `issue.md`, so `issue` is normally skipped after a load.
 4. **Fix** — apply the proposed remediation and record exactly what changed. Pass `--branch` (or `--worktree`) to isolate the fix on its own git branch.
@@ -102,7 +102,7 @@ specify extension enable bug
 
 The extension reads `.specify/extensions/bug/bug-config.yml` (copied from `config-template.yml` on install). Options:
 
-- `auto_create_issue` (`false`) — when `true`, `speckit.bug.assess` files the GitHub issue automatically after writing the assessment. Set to `false` to opt out (the shipped default). The `--issue` flag overrides this per run.
+- `auto_create_issue` (`false`) — when `true`, `speckit.bug.assess` files the GitHub issue automatically after writing the assessment (via the `after_bug_assess` hook). Set to `false` to opt out (the shipped default). The `--issue` flag overrides this for a single run either way: with the config `true` the hook files it with or without the flag, and with the config `false` `assess` files it inline — so a single run can opt in without editing `bug-config.yml`.
 - `branch_prefix` (`"fix"`) — prefix for the fix branch created by `speckit.bug.fix --branch` / `--worktree` (branch is `<prefix>/<slug>`, e.g. `fix/login-timeout`).
 - `default_host` (`"github"`) — Git host used when creating issues/PRs.
 
@@ -112,7 +112,7 @@ The extension reads `.specify/extensions/bug/bug-config.yml` (copied from `confi
 
 ## Assess vs Load vs Report
 
-- **Assess** means *triage a report into a local `assessment.md`* — it never touches GitHub. Use it for a bug described in pasted text or a URL.
+- **Assess** means *triage a report into a local `assessment.md`* — it does not touch GitHub unless `--issue` or `auto_create_issue` opts in. Use it for a bug described in pasted text or a URL.
 - **Load** (`speckit.bug.fetch`) means *pull an issue that already exists on GitHub* into `issue.md` and seed an `assessment.md` draft. Use it when the bug is already tracked and you want to work on it here. It is the read-only complement of "Report".
 - **Report** (`speckit.bug.issue`) means *file the bug as a new GitHub issue* from an assessment. After a `fetch`, the issue is already loaded, so "Report" is normally skipped — `fetch` and `issue` both produce `issue.md`, and `bug.issue` refuses to create a duplicate when one already exists.
 
@@ -121,7 +121,7 @@ This separation keeps triage read-only and lets you decide per bug whether it is
 ## Guardrails
 
 - `speckit.bug.assess` and `speckit.bug.test` **never modify source code**. They read the repository and write only inside `.specify/bugs/<slug>/`.
-- `speckit.bug.issue` and `speckit.bug.pr` are opt-in **external** actions (they call the `gh` CLI). They never edit repository source; when `gh`/GitHub is unavailable they write a local draft (`issue-draft.md` / `pr-draft.md`) instead of erroring.
+- `speckit.bug.issue` and `speckit.bug.pr` are opt-in **external** actions (they call the `gh` CLI), and so is `speckit.bug.assess` when `--issue` asks it to file the issue inline. They never edit repository source; when `gh`/GitHub is unavailable they write a local draft (`issue-draft.md` / `pr-draft.md`) instead of erroring.
 - `speckit.bug.fix` is the only command that edits source code, and it stays within the files listed in the assessment unless new evidence requires expanding scope (which is logged in `fix.md` under **Deviations from Assessment**).
 - None of the commands overwrite an existing report file without explicit confirmation; in automated mode they refuse and pick a new unique slug instead.
 - Verdicts and verification results are never over-claimed: a reproduction that was not actually performed is reported as `partial` or `not-run`, not `verified`.
@@ -135,9 +135,10 @@ This extension registers one hook:
   gated by the `auto_create_issue` config condition (`config.auto_create_issue == 'true'`), so it only
   executes when that setting is enabled. With `auto_create_issue: false` (the shipped default —
   the opt-out) the condition fails and the hook is skipped, so `assess`
-  only *suggests* the issue step.
+  only *suggests* the issue step — unless the run passed `--issue`, which files the issue inline.
 
-This is how the `auto_create_issue` setting takes effect: it is not re-read inline by `assess`. Instead,
-when `auto_create_issue: true`, the installed hook is an Automatic Hook (`optional: false`) that runs
-`speckit.bug.issue` automatically after each assessment. Toggle the setting in
-`.specify/extensions/bug/bug-config.yml` — no reinstall is required.
+This is how `auto_create_issue: true` takes effect: the installed hook is an Automatic Hook
+(`optional: false`) that runs `speckit.bug.issue` automatically after each assessment, with no
+reinstall required to toggle it. `assess` reads the same setting for one purpose only — to avoid
+filing twice: when it is `true` the hook owns the filing, and when it is `false` a `--issue` run files
+the issue itself. Toggle the setting in `.specify/extensions/bug/bug-config.yml`.
