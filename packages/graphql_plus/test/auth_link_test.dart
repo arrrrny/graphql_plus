@@ -416,7 +416,8 @@ void main() {
       );
     });
 
-    test('a consumer that cancels while onAuthError is in flight sends no replay',
+    test(
+        'a consumer that cancels while onAuthError is in flight sends no replay',
         () async {
       final server = _AuthServer(
         firstStatus: 401,
@@ -539,12 +540,12 @@ void main() {
       Object? failure;
       runZonedGuarded(() {
         link.request(_viewerRequest()).listen(
-          (_) {},
-          onError: (Object error, StackTrace _) => failure = error,
-          onDone: () {
-            if (!done.isCompleted) done.complete();
-          },
-        );
+              (_) {},
+              onError: (Object error, StackTrace _) => failure = error,
+              onDone: () {
+                if (!done.isCompleted) done.complete();
+              },
+            );
       }, (Object error, StackTrace _) => uncaught.add(error));
 
       // The subscription must terminate: a replay that fails surfaces the original error

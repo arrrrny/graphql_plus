@@ -178,7 +178,7 @@ class AuthLink extends Link {
           );
         } catch (error, stack) {
           // A synchronous throw from getToken/forward is not an auth failure to replay.
-          fail(error, stack);
+          await fail(error, stack);
         }
       }
 
