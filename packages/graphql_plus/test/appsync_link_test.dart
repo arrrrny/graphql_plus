@@ -203,7 +203,8 @@ void main() {
       );
     });
 
-    test('appends /realtime to a custom domain that merely contains '
+    test(
+        'appends /realtime to a custom domain that merely contains '
         'appsync-api', () {
       // Dot-anchoring: the substring heuristic would rewrite this host to
       // the non-existent myappsync-realtime-api.corp.example.com.
@@ -489,7 +490,8 @@ void main() {
       await link.dispose();
     });
 
-    test('surfaces a failing auth provider on the response stream instead of '
+    test(
+        'surfaces a failing auth provider on the response stream instead of '
         'hanging, and retries on reconnect', () async {
       final link = AppSyncWebSocketLink(
         server.url,
