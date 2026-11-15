@@ -93,6 +93,14 @@ changelog_notes() {
   ' "$changelog"
 }
 
+# Extract the `latest` version from a pub.dev package-API JSON body (stdin).
+# One copy of the regex, shared by the fail-closed reader below and the two
+# fail-open wait loops: a transient 5xx mid-wait must retry, so those callers
+# pipe the raw body through this rather than the reader (which aborts the run).
+pub_dev_extract_version() {
+  sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
 # The latest version pub.dev serves for a package, as one of three answers:
 #
 #   <version>   the package is published and this is its `latest` version
@@ -115,8 +123,7 @@ pub_dev_latest_version() {
     404) echo absent; return 0 ;;
     *) return 2 ;;
   esac
-  version="$(printf '%s' "$body" |
-    sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p')"
+  version="$(printf '%s' "$body" | pub_dev_extract_version)"
   [ -n "$version" ] || return 2
   printf '%s\n' "$version"
 }
@@ -360,7 +367,7 @@ if [ "$LOCAL" = 0 ]; then
   step "Wait for $CLIENT_NAME $CLIENT_VERSION on pub.dev"
   deadline=$((SECONDS + PUBLISH_WAIT_SECONDS))
   until [ "$(curl -sf --max-time 20 "https://pub.dev/api/packages/$CLIENT_NAME" |
-    sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p')" = "$CLIENT_VERSION" ]; do
+    pub_dev_extract_version)" = "$CLIENT_VERSION" ]; do
     [ "$SECONDS" -lt "$deadline" ] ||
       die "$CLIENT_NAME $CLIENT_VERSION did not appear on pub.dev within ${PUBLISH_WAIT_SECONDS}s — check the Release (dart) run: gh run list --workflow 'Release (dart)'"
     sleep 15
@@ -391,12 +398,16 @@ if [ "$LOCAL" = 0 ]; then
   echo "released $FLUTTER_TAG — Release (flutter) is publishing $FLUTTER_NAME"
 else
   confirm
-  step "Publish from this machine"
+  step "Publish from this machine ($ENVIRONMENT)"
+  # The workflow path records the tier in the release footer and tag annotation;
+  # --local creates neither, so without this a `staging --local` and a
+  # `production --local` are indistinguishable after the fact. Print it here.
+  echo "environment: $ENVIRONMENT — branch: $BRANCH — commit: $LOCAL_HEAD"
   (cd "$CLIENT_DIR" && dart pub publish --force)
   step "Wait for $CLIENT_NAME $CLIENT_VERSION on pub.dev"
   deadline=$((SECONDS + PUBLISH_WAIT_SECONDS))
   until [ "$(curl -sf --max-time 20 "https://pub.dev/api/packages/$CLIENT_NAME" |
-    sed -n 's/.*"latest":[[:space:]]*{[^}]*"version":[[:space:]]*"\([^"]*\)".*/\1/p')" = "$CLIENT_VERSION" ]; do
+    pub_dev_extract_version)" = "$CLIENT_VERSION" ]; do
     [ "$SECONDS" -lt "$deadline" ] ||
       die "$CLIENT_NAME $CLIENT_VERSION did not appear on pub.dev within ${PUBLISH_WAIT_SECONDS}s"
     sleep 10
@@ -408,14 +419,28 @@ fi
 # -------------------------------------------------------------- verification
 
 step "Verify both packages on pub.dev"
+
+# Which release workflow publishes a package — the name `gh run list
+# --workflow` needs (the real workflow names, not the generic "Release").
+release_workflow_of() {
+  case "$1" in
+    "$CLIENT_NAME") echo "Release (dart)" ;;
+    "$FLUTTER_NAME") echo "Release (flutter)" ;;
+    *) echo "Release" ;;
+  esac
+}
+
 for pair in "$CLIENT_NAME:$CLIENT_VERSION" "$FLUTTER_NAME:$FLUTTER_VERSION"; do
   name="${pair%%:*}"
   version="${pair##*:}"
   if ! live="$(pub_dev_latest_version "$name")"; then
-    die "could not read $name from pub.dev — the publish may or may not have landed. Check: gh run list --workflow 'Release'"
+    die "could not read $name from pub.dev — the publish may or may not have landed. Check: gh run list --workflow '$(release_workflow_of "$name")'"
+  fi
+  if [ "$live" = absent ]; then
+    die "$name is not on pub.dev (absent), expected $version"
   fi
   [ "$live" = "$version" ] ||
-    die "$name is at ${live} on pub.dev, expected $version"
+    die "$name is at $live on pub.dev, expected $version"
   echo "$name $version — live on pub.dev"
 done
 
