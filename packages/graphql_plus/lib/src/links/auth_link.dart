@@ -123,9 +123,24 @@ class AuthLink extends Link {
           if (!cancelled) await controller.close();
         } catch (_) {
           // The replay itself failed. Surface the *original* error: it is the one the caller
-          // cares about, and a failure while refreshing must not mask it.
-          if (!cancelled) controller.addError(originalError, originalStack);
+          // cares about, and a failure while refreshing must not mask it. The stream is then
+          // closed, so the listener terminates instead of hanging on an open subscription.
+          if (!cancelled) {
+            controller.addError(originalError, originalStack);
+            await controller.close();
+          }
         }
+      }
+
+      /// Ends the stream with [error], unchanged.
+      ///
+      /// [cancelOnError] cancels the forwarded subscription without calling `onDone`, and a
+      /// `Stream.multi` controller stays open until it is closed, so every terminal path has
+      /// to close it explicitly — otherwise the caller's listener never completes.
+      Future<void> fail(Object error, StackTrace stack) async {
+        if (cancelled) return;
+        controller.addError(error, stack);
+        await controller.close();
       }
 
       Future<void> run() async {
@@ -137,12 +152,21 @@ class AuthLink extends Link {
             onError: (Object error, StackTrace stack) async {
               // Not an auth failure, or the caller declined a refresh: surface it unchanged.
               if (replaying || cancelled || onAuthError == null) {
-                if (!cancelled) controller.addError(error, stack);
+                await fail(error, stack);
                 return;
               }
-              final refresh = await onAuthError!(error);
+              final bool refresh;
+              try {
+                refresh = await onAuthError!(error);
+              } catch (_) {
+                // The hook itself blew up. That is not the error the caller is waiting for,
+                // and letting it escape the callback would strand the operation as an
+                // uncaught async error, so the original error is surfaced instead.
+                await fail(error, stack);
+                return;
+              }
               if (!refresh || cancelled || replaying) {
-                if (!cancelled) controller.addError(error, stack);
+                await fail(error, stack);
                 return;
               }
               refreshAndReplay(error, stack);
@@ -154,7 +178,7 @@ class AuthLink extends Link {
           );
         } catch (error, stack) {
           // A synchronous throw from getToken/forward is not an auth failure to replay.
-          if (!cancelled) controller.addError(error, stack);
+          await fail(error, stack);
         }
       }
 
