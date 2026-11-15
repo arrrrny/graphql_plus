@@ -415,6 +415,145 @@ void main() {
             'two initial fetches plus one shared refresh (not one per request)',
       );
     });
+
+    test('a consumer that cancels while onAuthError is in flight sends no replay',
+        () async {
+      final server = _AuthServer(
+        firstStatus: 401,
+        firstResponse: {
+          'errors': [
+            {'message': 'token expired'}
+          ]
+        },
+        secondResponse: {
+          'data': {
+            'viewer': {'id': '1'}
+          }
+        },
+      );
+      await server.start();
+      addTearDown(server.stop);
+
+      // The callback stays open past the cancellation, so the cancellation lands while it
+      // is still being awaited — the shape that used to resume the generator and replay.
+      final refreshGate = Completer<void>();
+      final link = Link.from([
+        AuthLink(
+          getToken: () => 'Bearer stale',
+          onAuthError: (_) async {
+            await refreshGate.future;
+            return true;
+          },
+        ),
+        HttpLink(server.url),
+      ]);
+
+      final uncaught = <Object>[];
+      late final StreamSubscription<Response> sub;
+      runZonedGuarded(() {
+        sub = link.request(_viewerRequest()).listen((_) {});
+      }, (Object error, StackTrace _) => uncaught.add(error));
+
+      // Let the first request fail and the callback start awaiting.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sub.cancel();
+      refreshGate.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(server.hits, 1, reason: 'a cancelled operation must not replay');
+      expect(uncaught, isEmpty,
+          reason: 'the stranded replay must not surface as an async error');
+    });
+
+    test('an onAuthError that throws surfaces the original error', () async {
+      final server = _AuthServer(
+        firstStatus: 401,
+        firstResponse: {
+          'errors': [
+            {'message': 'token expired'}
+          ]
+        },
+        secondResponse: {
+          'data': {
+            'viewer': {'id': '1'}
+          }
+        },
+      );
+      await server.start();
+      addTearDown(server.stop);
+
+      final link = Link.from([
+        AuthLink(
+          getToken: () => 'Bearer stale',
+          // A refresh hook that itself blows up must not replace — or strand — the
+          // error the caller is waiting for.
+          onAuthError: (_) => throw StateError('refresh blew up'),
+        ),
+        HttpLink(server.url),
+      ]);
+
+      final uncaught = <Object>[];
+      Object? thrown;
+      // The await stays inside the guarded zone: a future created in the zone and awaited
+      // outside it reports its error to the zone handler rather than to the awaiter.
+      await runZonedGuarded(() async {
+        try {
+          await link.request(_viewerRequest()).first;
+        } catch (error) {
+          thrown = error;
+        }
+      }, (Object error, StackTrace _) => uncaught.add(error));
+
+      expect(thrown, isA<HttpLinkServerException>());
+      expect(uncaught, isEmpty,
+          reason: 'the hook failure must not escape as an async error');
+      expect(server.hits, 1, reason: 'a failed refresh must not replay');
+    });
+
+    test('a failed replay surfaces the original error and completes the stream',
+        () async {
+      final server = _AuthServer(
+        firstStatus: 401,
+        secondStatus: 401,
+        firstResponse: {
+          'errors': [
+            {'message': 'token expired'}
+          ]
+        },
+        secondResponse: {
+          'errors': [
+            {'message': 'token still expired'}
+          ]
+        },
+      );
+      await server.start();
+      addTearDown(server.stop);
+
+      final link = Link.from([
+        AuthLink(getToken: () => 'Bearer fresh', onAuthError: (_) => true),
+        HttpLink(server.url),
+      ]);
+
+      final done = Completer<void>();
+      final uncaught = <Object>[];
+      Object? failure;
+      runZonedGuarded(() {
+        link.request(_viewerRequest()).listen(
+          (_) {},
+          onError: (Object error, StackTrace _) => failure = error,
+          onDone: () {
+            if (!done.isCompleted) done.complete();
+          },
+        );
+      }, (Object error, StackTrace _) => uncaught.add(error));
+
+      // The subscription must terminate: a replay that fails surfaces the original error
+      // and then closes, rather than leaving the listener hanging.
+      await done.future.timeout(const Duration(seconds: 10));
+      expect(failure, isA<HttpLinkServerException>());
+      expect(uncaught, isEmpty);
+      expect(server.hits, 2, reason: 'exactly one replay');
+    });
   });
 }
 

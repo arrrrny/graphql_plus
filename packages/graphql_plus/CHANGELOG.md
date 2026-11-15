@@ -93,7 +93,27 @@
     replayed request carries the same context entries (for example `HttpLinkHeaders`) as the
     original, so a trace header or similar survives the refresh.
 
+## Removed
+- **`AuthLink.transform(headerKey, getToken)` and the `OnException` typedef** — both were
+  public API on 5.2.6 (re-exported from `graphql_plus.dart` via `lib/src/links/links.dart`) and
+  both were dropped in **v5.3.0**, by the `AuthLink.onAuthError` change above, without a note at
+  the time. They went with the private `_AsyncReqTransformLink` base: `AuthLink` is now a `Link`
+  directly and builds its header in the private `_withToken` helper. Nothing replaces the static
+  — it was only reachable through that base — so a downstream `AuthLink.transform(...)` call no
+  longer compiles at upgrade; build the header in your own `Link` (or pass it through
+  `onAuthError`/`getToken`) instead.
+
 ## Fixed
+- **`AuthLink` no longer hangs or leaks an async error when the refresh path fails** (closes the
+  review findings on #25 / #49). Two defects in the `Stream.multi` body, both in the
+  refresh-and-replay path: a hook that threw escaped the stream's asynchronous `onError`
+  callback as an uncaught async error — the operation never received the error it was waiting
+  for, and in Flutter that lands on `PlatformDispatcher.onError` — and a replay that failed
+  called `controller.addError` without closing the controller, so the listener's `onDone` never
+  fired and every consumer of the stream hung. A throwing `onAuthError` now surfaces the
+  **original** error, and every terminal path (a declined refresh, a throwing hook, a failed
+  replay) closes the stream after surfacing it. Also pins the cancellation behaviour: a consumer
+  that cancels while `onAuthError` is in flight sends no replay and produces no uncaught error.
 - **A `graphql-transport-ws` peer that never answers `ping` keeps its keepalive** (closes the
   review findings on #29). `_enqueuePing` armed a one-shot `Timer` that was only re-armed when
   a `pong` arrived, so a peer that never answered received exactly one ping and then nothing —
