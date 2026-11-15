@@ -1,0 +1,10 @@
+name: appsync_subscriptions_example
+description: AWS AppSync (Amplify) REALTIME subscriptions with graphql_plus
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  graphql_plus:
+    path: ../../packages/graphql_plus

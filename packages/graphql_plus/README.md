@@ -1291,6 +1291,52 @@ API key, IAM, and Federated provider authorization could be accomplished through
 - Making a custom link: [Comment on Issue 173](https://github.com/zino-app/graphql-flutter/issues/173#issuecomment-464435942)
 - AWS JS SDK `auth-link.ts`: [aws-mobile-appsync-sdk-js:auth-link.ts](https://github.com/awslabs/aws-mobile-appsync-sdk-js/blob/master/packages/aws-appsync-auth-link/src/auth-link.ts)
 
+**Subscriptions — AppSync REALTIME protocol**
+
+Queries and mutations above go through plain HTTPS, but AppSync speaks its own
+REALTIME dialect over the websocket for subscriptions: the connection
+authorization travels in `header`/`payload` query parameters of the upgrade
+request, every start message carries per-message authorization under
+`payload.extensions.authorization`, and the client must wait for
+`connection_ack` before registering anything. The standard `WebSocketLink`
+cannot express that, so use [`AppSyncWebSocketLink`](./lib/src/links/websocket_link/appsync_link.dart)
+for the subscription side:
+
+```dart
+final httpLink = HttpLink('https://abc123.appsync-api.us-east-1.amazonaws.com/graphql');
+
+final appsyncLink = AppSyncWebSocketLink(
+  'https://abc123.appsync-api.us-east-1.amazonaws.com/graphql',
+  // Re-consulted on every (re)connection and subscription registration, so a
+  // refreshed Cognito token is always what goes on the wire.
+  authProvider: AppSyncJwtAuth(() async => session.jwtToken),
+);
+
+final link = Link.split(
+  (request) => request.isSubscription,
+  appsyncLink,
+  httpLink,
+);
+```
+
+The endpoint is resolved to the REALTIME endpoint automatically
+(`*.appsync-api.…` → `wss://*.appsync-realtime-api.…`, custom domains get
+`/realtime` appended). Supported authorization modes, per the
+[AWS REALTIME protocol](https://docs.aws.amazon.com/appsync/latest/devguide/real-time-websocket-client.html):
+
+| Mode | Provider | Fields |
+|:-----|:---------|:-------|
+| API key | `AppSyncApiKeyAuth('da2-…')` | `x-api-key` |
+| Cognito user pools / OIDC / Lambda | `AppSyncJwtAuth(() => token)` | `Authorization` |
+| IAM | `AppSyncIamAuth((operation) => …)` | SigV4-signed fields, signed per message by your AWS stack |
+
+`AppSyncWebSocketLink` also accepts the usual `SocketClientConfig` knobs
+(`autoReconnect`, `delayBetweenReconnectionAttempts`, `onConnectionLost`, …).
+Its `inactivityTimeout` defaults to 5 minutes, which comfortably exceeds
+AppSync's keep-alive (`ka`) cadence — AppSync has no ping/pong half-protocol.
+
+A runnable example lives in [examples/appsync_subscriptions](../../examples/appsync_subscriptions/).
+
 ## Code generation
 
 This package does not support code-generation out of the box, but [graphql_codegen](https://pub.dev/packages/graphql_codegen) does!

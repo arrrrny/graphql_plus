@@ -1,3 +1,35 @@
+# v5.4.0
+
+## Added
+- **AWS AppSync REALTIME subscriptions** — first-class support for the AppSync
+  REALTIME websocket protocol (closes #16). `AppSyncWebSocketLink` performs the
+  REALTIME handshake (connection authorization in the base64 `header`/`payload`
+  upgrade query parameters, bare `connection_init`, `ka` watchdog instead of
+  ping/pong) and re-resolves both the connection and per-message authorization
+  on every (re)connection, so dynamic Cognito/OIDC tokens survive reconnects.
+  - `AppSyncAuthProvider` supplies the authorization fields — `AppSyncApiKeyAuth`
+    (`x-api-key`), `AppSyncJwtAuth` (`Authorization` from a token callback
+    invoked per connection and per registration) and `AppSyncIamAuth`
+    (SigV4 fields, signed separately for the connect request and each
+    subscription registration).
+  - `AppSyncRequestSerializer` builds the REALTIME envelope: the operation is
+    JSON-stringified into `payload.data` and the per-message authorization
+    attached under `payload.extensions.authorization`.
+  - `appSyncRealtimeEndpoint` maps standard AppSync domains
+    (`*.appsync-api.<region>.amazonaws.com`) to their realtime counterparts;
+    any other host keeps its host and gets `/realtime` appended.
+  - The start/subscribe write claims its initializer slot before awaiting the
+    (possibly async) serialization, and a resumed attempt only writes when the
+    socket was not replaced mid-serialization — a reconnect during a slow
+    token refresh cannot produce a duplicate `start` for the same id.
+
+## Breaking
+- **`SocketClient.serialize` getter removed** — replaced by
+  `serializeRequest(Request)`, which honors `SocketClientConfig.serialize`
+  overrides that return a `Future` (needed for per-message token resolution).
+  Downstream code calling `socketClient.serialize(req)` must call
+  `socketClient.serializeRequest(req)` instead.
+
 # v5.3.0
 
 ## Added
