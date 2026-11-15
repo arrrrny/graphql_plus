@@ -14,10 +14,22 @@
 #   2. `--local` must be RESUMABLE: a client version that is already on pub.dev
 #      is a skip-and-continue point, not a preflight death.
 #
+# Two more branches are covered beyond those: the workflow path (no --local) —
+# tag, release, the same resolvability wait, and a publish that happens ONLY
+# through the workflows — and the probe's deadline, which must die loudly and
+# leave no scratch dir behind.
+#
 # The shims key off a state dir (exported as RELEASE_TEST_STATE):
-#   state/client-published   created by the dart shim on `pub publish --force`;
-#                            pre-create it to simulate a half-finished release
+#   state/client-published   created by the dart shim on `pub publish --force`
+#                            (pre-create it to simulate a half-finished
+#                            release) and by the gh shim on the client tag's
+#                            release — the stand-in for the Release (dart)
+#                            workflow publishing it on the workflow path
 #   state/flutter-published  created by the flutter shim on `publish --force`
+#                            and by the gh shim on the flutter tag's release —
+#                            the stand-in for the Release (flutter) workflow
+#   state/probe-stuck        pre-create it to keep the resolvability probe
+#                            failing forever — the deadline fixture
 #   state/probe-resolvable   created by the dart shim the first time the
 #                            resolvability probe (`dart pub get` in the probe
 #                            package) runs after the client is published —
@@ -82,7 +94,8 @@ EOF
   # dart: records invocations; `pub publish --force` marks the client shipped;
   # `pub get` in the probe package is the resolvability probe — it fails until
   # the client is published, and on its first success flips probe-resolvable
-  # (pub.dev finished indexing).
+  # (pub.dev finished indexing). probe-stuck pre-empts that: pub.dev never
+  # finishes indexing, so the probe fails to the deadline.
   cat >"$bin/dart" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -103,6 +116,11 @@ case "$1 $2" in
     esac ;;
   "pub get")
     if [ -f pubspec.yaml ] && grep -q "name: release_resolvability_probe" pubspec.yaml; then
+      if [ -e "$STATE/probe-stuck" ]; then
+        log "resolvability probe FAIL"
+        echo "Because release_resolvability_probe depends on graphql_plus ^$CLIENT_VERSION which doesn't match any versions, version solving failed." >&2
+        exit 1
+      fi
       if [ -e "$STATE/client-published" ]; then
         touch "$STATE/probe-resolvable"
         log "resolvability probe OK"
@@ -149,12 +167,31 @@ case "$*" in
     exit 0 ;;
 esac
 EOF
-  # gh: only `require gh` runs on the --local path under test.
+  # gh: `require gh` is all the --local path runs. On the workflow path the
+  # release commands are also where the real run triggers the Release
+  # workflows, so a gh invocation naming a package's tag is the stand-in for
+  # that workflow publishing the package (the shim's registry view flips with
+  # it, exactly as the dart/flutter shims do after a local publish).
   cat >"$bin/gh" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
+STATE="${RELEASE_TEST_STATE:?}"
+case "$*" in
+  *"graphql_plus-v$CLIENT_VERSION"*) touch "$STATE/client-published" ;;
+esac
+case "$*" in
+  *"graphql_flutter_plus-v$FLUTTER_VERSION"*) touch "$STATE/flutter-published" ;;
+esac
 exit 0
 EOF
-  chmod +x "$bin/curl" "$bin/dart" "$bin/flutter" "$bin/gh"
+  # sleep: the probe's poll interval is 10s in release.sh, and the deadline
+  # test must outwait PUBLISH_WAIT_SECONDS — compress every sleep to 1s, long
+  # enough for $SECONDS to advance, fast enough to keep the suite quick.
+  cat >"$bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+exec /bin/sleep 1
+EOF
+  chmod +x "$bin/curl" "$bin/dart" "$bin/flutter" "$bin/gh" "$bin/sleep"
 }
 
 # ------------------------------------------------------------------ sandbox
@@ -177,6 +214,10 @@ make_sandbox() {
     "$sandbox/repo/packages/graphql_flutter_plus/"
   write_shims "$sandbox/bin"
   git -C "$sandbox/repo" init >/dev/null 2>&1
+  # Annotated tags on the workflow path need an identity in the repo itself —
+  # the commit below uses one-shot -c flags that do not persist.
+  git -C "$sandbox/repo" config user.email test@example.com
+  git -C "$sandbox/repo" config user.name test
   git -C "$sandbox/repo" symbolic-ref HEAD refs/heads/master
   git -C "$sandbox/repo" add -A
   git -C "$sandbox/repo" -c user.email=test@example.com -c user.name=test \
@@ -187,15 +228,24 @@ make_sandbox() {
   echo "$sandbox"
 }
 
-run_release_local() {
-  local sandbox="$1"
+# Run release.sh inside the sandbox with the shims on PATH. The first two
+# arguments are the sandbox and the resolvability-wait budget; the rest go to
+# release.sh verbatim, so the workflow branch runs as `production --yes`.
+run_release() {
+  local sandbox="$1" wait="$2"
+  shift 2
   (
     export PATH="$sandbox/bin:$PATH"
     export RELEASE_TEST_STATE="$sandbox/state"
     export CLIENT_VERSION FLUTTER_VERSION
-    export PUBLISH_WAIT_SECONDS=30
-    "$sandbox/repo/scripts/release.sh" production --local --yes
+    export PUBLISH_WAIT_SECONDS="$wait"
+    "$sandbox/repo/scripts/release.sh" "$@"
   )
+}
+
+run_release_local() {
+  local sandbox="$1"
+  run_release "$sandbox" 30 production --local --yes
 }
 
 show_run() {
@@ -249,10 +299,73 @@ test_local_resume_publishes_flutter() {
   pass "--local resumes past an already-published client to the flutter publish"
 }
 
+# 3. The workflow branch (no --local): the run tags and releases both packages
+#    and never publishes from this machine — the Release workflows do. It must
+#    still hold the flutter dry run until the client is resolvable (the same
+#    probe release.sh runs after the client's release), then verify both.
+test_workflow_path_tags_and_waits() {
+  local sandbox; sandbox="$(make_sandbox)"
+  if ! run_release "$sandbox" 30 production --yes >"$sandbox/state/output.log" 2>&1; then
+    show_run "$sandbox"
+    fail "release.sh exited nonzero on the workflow path"
+  fi
+  show_run "$sandbox"
+  grep -q "resolvability probe OK" "$sandbox/state/dart.log" ||
+    fail "the workflow path skipped the resolvability wait"
+  grep -q "flutter registry dry-run OK" "$sandbox/state/flutter.log" ||
+    fail "the workflow path did not validate against the live client"
+  if grep -q "client publish --force" "$sandbox/state/dart.log"; then
+    fail "the workflow path published the client from this machine"
+  fi
+  if grep -q "flutter publish --force" "$sandbox/state/flutter.log"; then
+    fail "the workflow path published the flutter package from this machine"
+  fi
+  for tag in "graphql_plus-v$CLIENT_VERSION" "graphql_flutter_plus-v$FLUTTER_VERSION"; do
+    git -C "$sandbox/origin.git" rev-parse -q --verify "refs/tags/$tag" >/dev/null ||
+      fail "the workflow path never pushed $tag to origin"
+  done
+  grep -q "Release complete" "$sandbox/state/output.log" ||
+    fail "the workflow run never reached its verification step"
+  cleanup
+  pass "workflow path tags, releases, waits for resolvability, publishes nothing locally"
+}
+
+# 4. A probe that never succeeds must hit the deadline and die loudly — and
+#    clean the probe's scratch dir on the way out, the leak the success path's
+#    rm -rf does not cover.
+test_probe_deadline_dies_and_cleans_scratch() {
+  local sandbox; sandbox="$(make_sandbox)"
+  mkdir -p "$sandbox/tmp"
+  touch "$sandbox/state/client-published" # the client already shipped
+  touch "$sandbox/state/probe-stuck"      # ...but pub.dev never serves it
+  if (
+    export PATH="$sandbox/bin:$PATH" RELEASE_TEST_STATE="$sandbox/state"
+    export CLIENT_VERSION FLUTTER_VERSION TMPDIR="$sandbox/tmp"
+    export PUBLISH_WAIT_SECONDS=3
+    "$sandbox/repo/scripts/release.sh" production --local --yes
+  ) >"$sandbox/state/output.log" 2>&1; then
+    show_run "$sandbox"
+    fail "release.sh ignored the probe deadline and exited zero"
+  fi
+  show_run "$sandbox"
+  grep -q "did not become resolvable on pub.dev within" "$sandbox/state/output.log" ||
+    fail "release.sh died on something other than the probe deadline"
+  [ "$(grep -c 'resolvability probe FAIL' "$sandbox/state/dart.log")" -ge 2 ] ||
+    fail "the wait gave up after a single probe instead of polling to the deadline"
+  local leaked
+  leaked="$(find "$sandbox/tmp" -maxdepth 1 -name 'graphql-plus-resolve.*' | wc -l | tr -d ' ')"
+  [ "$leaked" -eq 0 ] ||
+    fail "the deadline path leaked $leaked resolvability-probe scratch dir(s) in TMPDIR"
+  cleanup
+  pass "probe deadline dies loudly and leaves no scratch dir behind"
+}
+
 main() {
   [ -x "$RELEASE" ] || fail "missing $RELEASE"
   test_wait_polls_resolvability
   test_local_resume_publishes_flutter
+  test_workflow_path_tags_and_waits
+  test_probe_deadline_dies_and_cleans_scratch
   echo "release_test: all tests passed"
 }
 

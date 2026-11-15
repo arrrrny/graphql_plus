@@ -119,8 +119,13 @@ EOF
   step "Wait for $name $version to be resolvable on pub.dev"
   deadline=$((SECONDS + PUBLISH_WAIT_SECONDS))
   until (cd "$scratch" && dart pub get >/dev/null 2>&1); do
-    [ "$SECONDS" -lt "$deadline" ] ||
+    # The deadline path must clean the scratch like the success path: die
+    # exits from inside the loop and would strand the probe package (with
+    # its .dart_tool once a real pub get ran) in $TMPDIR.
+    [ "$SECONDS" -lt "$deadline" ] || {
+      rm -rf "$scratch"
       die "$name $version did not become resolvable on pub.dev within ${PUBLISH_WAIT_SECONDS}s — pub get keeps failing on ^$version (check https://pub.dev/packages/$name/versions)"
+    }
     sleep 10
   done
   rm -rf "$scratch"
